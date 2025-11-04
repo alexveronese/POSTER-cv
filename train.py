@@ -19,6 +19,13 @@ from utils import *
 from data_preprocessing.sam import SAM
 from models.emotion_hyp import pyramid_trans_expr
 
+from torchvision import datasets
+from torch.utils.data import DataLoader
+from data_preprocessing.data_loader import SelectiveImbalancedSampler
+
+
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='rafdb', help='dataset')
@@ -41,8 +48,18 @@ def run_training():
     args = parse_args()
     torch.manual_seed(123)
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
-    print("Work on GPU: ", os.environ['CUDA_VISIBLE_DEVICES'])
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+        print("Using device: MPS (Apple Silicon GPU)")
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+        print("Using device: CUDA")
+        # Multi-GPU support solo per CUDA
+        if torch.cuda.device_count() > 1:
+            print("Using", torch.cuda.device_count(), "GPUs")
+    else:
+        device = torch.device("cpu")
+        print("Using device: CPU")
 
 
     data_transforms = transforms.Compose([
@@ -62,10 +79,12 @@ def run_training():
 
     num_classes = 7
     if args.dataset == "rafdb":
-        datapath = './data/raf-basic/'
+        datapath = './dataset/DATASET/'
         num_classes = 7
+
         train_dataset = RafDataSet(datapath, train=True, transform=data_transforms, basic_aug=True)
         val_dataset = RafDataSet(datapath, train=False, transform=data_transforms_val)
+
         model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype)
 
     elif args.dataset == "affectnet":
@@ -88,12 +107,12 @@ def run_training():
     val_num = val_dataset.__len__()
     print('Train set size:', train_dataset.__len__())
     print('Validation set size:', val_dataset.__len__())
-
+    minority_classes = [1, 2, 3, 6]
     train_loader = torch.utils.data.DataLoader(train_dataset,
-                                               # sampler=ImbalancedDatasetSampler(train_dataset),
+                                               sampler=SelectiveImbalancedSampler(train_dataset, minority_classes=minority_classes),
                                                batch_size=args.batch_size,
                                                num_workers=args.workers,
-                                               shuffle=True,
+                                               #shuffle=True,
                                                pin_memory=True)
 
 
@@ -106,7 +125,7 @@ def run_training():
     # model = Networks.ResNet18_ARM___RAF()
 
     model = torch.nn.DataParallel(model)
-    model = model.cuda()
+    model = model.to(device)
 
     print("batch_size:", args.batch_size)
 
@@ -133,7 +152,7 @@ def run_training():
     optimizer = SAM(model.parameters(), base_optimizer, lr=args.lr, rho=0.05, adaptive=False,)
 
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.98)
-    model = model.cuda()
+    model = model.to(device)
     parameters = filter(lambda p: p.requires_grad, model.parameters())
     parameters = sum([np.prod(p.size()) for p in parameters]) / 1_000_000
     print('Total Parameters: %.3fM' % parameters)
@@ -151,9 +170,9 @@ def run_training():
         for batch_i, (imgs, targets) in enumerate(train_loader):
             iter_cnt += 1
             optimizer.zero_grad()
-            imgs = imgs.cuda()
+            imgs = imgs.to(device)
             outputs, features = model(imgs)
-            targets = targets.cuda()
+            targets = targets.to(device)
 
             CE_loss = CE_criterion(outputs, targets)
             lsce_loss = lsce_criterion(outputs, targets)
@@ -193,8 +212,8 @@ def run_training():
             bingo_cnt = 0
             model.eval()
             for batch_i, (imgs, targets) in enumerate(val_loader):
-                outputs, features = model(imgs.cuda())
-                targets = targets.cuda()
+                outputs, features = model(imgs.to(device))
+                targets = targets.to(device)
 
                 CE_loss = CE_criterion(outputs, targets)
                 loss = CE_loss
@@ -221,7 +240,7 @@ def run_training():
                 torch.save({'iter': i,
                             'model_state_dict': model.state_dict(),
                             'optimizer_state_dict': optimizer.state_dict(), },
-                           os.path.join('./checkpoint', "epoch" + str(i) + "_acc" + str(val_acc) + ".pth"))
+                           os.path.join('./POSTER/checkpoint', "epoch" + str(i) + "_acc" + str(val_acc) + ".pth"))
                 print('Model saved.')
             if val_acc > best_acc:
                 best_acc = val_acc
