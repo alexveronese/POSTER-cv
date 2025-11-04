@@ -18,6 +18,8 @@ import torch
 import torch.utils.data
 import torchvision
 
+from torch.utils.data.sampler import Sampler
+
 logging.basicConfig()
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -32,28 +34,6 @@ def record_net_data_stats(y_train, net_dataidx_map):
         net_cls_counts[net_i] = tmp
     logging.debug('Data statistics: %s' % str(net_cls_counts))
     return net_cls_counts
-
-
-class Cutout(object):
-    def __init__(self, length):
-        self.length = length
-
-    def __call__(self, img):
-        h, w = img.size(1), img.size(2)
-        mask = np.ones((h, w), np.float32)
-        y = np.random.randint(h)
-        x = np.random.randint(w)
-
-        y1 = np.clip(y - self.length // 2, 0, h)
-        y2 = np.clip(y + self.length // 2, 0, h)
-        x1 = np.clip(x - self.length // 2, 0, w)
-        x2 = np.clip(x + self.length // 2, 0, w)
-
-        mask[y1: y2, x1: x2] = 0.
-        mask = torch.from_numpy(mask)
-        mask = mask.expand_as(img)
-        img *= mask
-        return img
 
 class Lighting(object):
     imagenet_pca = {
@@ -92,58 +72,65 @@ class Lighting(object):
     def __repr__(self):
         return self.__class__.__name__ + '()'
 
-class ImbalancedDatasetSampler(torch.utils.data.sampler.Sampler):
-    """Samples elements randomly from a given list of indices for imbalanced dataset
 
-    Arguments:
-        indices: a list of indices
-        num_samples: number of samples to draw
-        callback_get_label: a callback-like function which takes two arguments - dataset and index
-    """
-
-    def __init__(self, dataset, indices: list = None, num_samples: int = None, callback_get_label: Callable = None):
-        # if indices is not provided, all elements in the dataset will be considered
+class SelectiveImbalancedSampler(Sampler):
+    def __init__(self, dataset, minority_classes: list, indices: list = None, num_samples: int = None, callback_get_label: Callable = None):
+        """
+        dataset: dataset PyTorch
+        minority_classes: lista di etichette da bilanciare (solo queste verranno oversample)
+        indices: lista opzionale di indici da considerare
+        num_samples: numero totale di campioni da estrarre
+        callback_get_label: funzione opzionale dataset->labels o dataset,idx->label
+        """
         self.indices = list(range(len(dataset))) if indices is None else indices
-
-        # define custom callback
         self.callback_get_label = callback_get_label
-
-        # if num_samples is not provided, draw `len(indices)` samples in each iteration
         self.num_samples = len(self.indices) if num_samples is None else num_samples
 
-        # distribution of classes in the dataset
-        df = pd.DataFrame()
-        df["label"] = self._get_labels(dataset)
-        df.index = self.indices
-        df = df.sort_index()
+        labels = self._get_labels(dataset)
+        if len(labels) == len(range(len(dataset))):
+            labels = [labels[i] for i in self.indices]
 
+        df = pd.DataFrame({"label": labels}, index=self.indices)
         label_to_count = df["label"].value_counts()
 
-        weights = 1.0 / label_to_count[df["label"]]
-
-        self.weights = torch.DoubleTensor(weights.to_list())
+        # Pesare solo le classi minoritarie
+        weights = []
+        for l in df["label"]:
+            if l in minority_classes:
+                weights.append(1.0 / label_to_count[l])
+            else:
+                weights.append(1.0)  # peso neutro per le classi maggiori
+        self.weights = torch.DoubleTensor(weights)
 
     def _get_labels(self, dataset):
-        if self.callback_get_label:
-            return self.callback_get_label(dataset)
-        elif isinstance(dataset, torchvision.datasets.MNIST):
-            return dataset.train_labels.tolist()
-        elif isinstance(dataset, torchvision.datasets.ImageFolder):
-            return [x[1] for x in dataset.imgs]
-        elif isinstance(dataset, torchvision.datasets.DatasetFolder):
-            return dataset.samples[:][1]
-        elif isinstance(dataset, torch.utils.data.Subset):
-            return dataset.dataset.imgs[:][1]
-        elif isinstance(dataset, torch.utils.data.Dataset):
-            return dataset.target
-        else:
-            raise NotImplementedError
+        if self.callback_get_label is not None:
+            try:
+                return self.callback_get_label(dataset)
+            except TypeError:
+                return [self.callback_get_label(dataset, i) for i in range(len(dataset))]
+        if hasattr(dataset, 'targets'):
+            return list(dataset.targets)
+        if hasattr(dataset, 'labels'):
+            return list(dataset.labels)
+        if hasattr(dataset, 'target'):
+            return list(dataset.target)
+        if hasattr(dataset, 'imgs'):
+            return [s[1] for s in dataset.imgs]
+        if hasattr(dataset, 'samples'):
+            return [s[1] for s in dataset.samples]
+        if isinstance(dataset, torch.utils.data.Subset):
+            return self._get_labels(dataset.dataset)
+        raise NotImplementedError("Cannot infer labels — pass callback_get_label(dataset) -> list or callback_get_label(dataset, idx) -> label")
 
     def __iter__(self):
-        return (self.indices[i] for i in torch.multinomial(self.weights, self.num_samples, replacement=True))
+        sampled_indices = torch.multinomial(self.weights, self.num_samples, replacement=True)
+        return iter([self.indices[i] for i in sampled_indices])
 
     def __len__(self):
         return self.num_samples
+
+
+
 
 def _data_transforms_cifar(datadir):
     if "cifar100" in datadir:
@@ -204,6 +191,7 @@ def _data_transforms_raf(datadir):
     train_transform = transforms.Compose([
         transforms.ToPILImage(),
         transforms.Resize((224, 224)),
+        Lighting(0.1),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         transforms.RandomErasing(scale=(0.02, 0.1))])

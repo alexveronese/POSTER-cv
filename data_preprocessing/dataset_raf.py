@@ -6,44 +6,65 @@ import os
 import random
 import cv2
 import numpy as np
-
+from torchvision import datasets
 
 
 class RafDataSet(data.Dataset):
-    def __init__(self, raf_path, dataidxs=None, train=True, transform=None, basic_aug=False, download=False):
+
+    ID_TO_EMOTION = {
+        1: "Surprise",
+        2: "Fear",
+        3: "Disgust",
+        4: "Happy",
+        5: "Sad",
+        6: "Angry",
+        7: "Neutral"
+    }
+
+    def __init__(self, raf_path, dataidxs=None, train=True, transform=None, basic_aug=False):
         self.train = train
         self.dataidxs = dataidxs
         self.transform = transform
         self.raf_path = raf_path
-
-        NAME_COLUMN = 0
-        LABEL_COLUMN = 1
-        df = pd.read_csv(os.path.join(self.raf_path, 'EmoLabel/list_patition_label.txt'), sep=' ', header=None)
-        if self.train:
-            dataset = df[df[NAME_COLUMN].str.startswith('train')]
-        else:
-            dataset = df[df[NAME_COLUMN].str.startswith('test')]
-        file_names = dataset.iloc[:, NAME_COLUMN].values
-        self.target = dataset.iloc[:, LABEL_COLUMN].values - 1  # 0:Surprise, 1:Fear, 2:Disgust, 3:Happiness, 4:Sadness, 5:Anger, 6:Neutral
-        self.target = np.array(self.target)
-
-        self.file_paths = []
-        for f in file_names:    # use raf-db aligned images for training/testing
-            f = f.split(".")[0]
-            f = f + "_aligned.jpg"
-            path = os.path.join(self.raf_path, 'Image/aligned', f)
-            self.file_paths.append(path)
-
         self.basic_aug = basic_aug
         self.aug_func = [flip_image, add_gaussian_noise]
-        ################
+
+        # === Seleziona split (train/test) ===
+        split_dir = "train" if self.train else "test"
+        data_dir = os.path.join(self.raf_path, split_dir)
+
+        if not os.path.exists(data_dir):
+            raise FileNotFoundError(f"Cartella {data_dir} non trovata!")
+
+        self.file_paths = []
+        self.target = []
+
+        # === Scansiona le cartelle numeriche (1-7) ===
+        for folder in sorted(os.listdir(data_dir)):
+            folder_path = os.path.join(data_dir, folder)
+            if not os.path.isdir(folder_path):
+                continue
+            try:
+                label = int(folder) - 1  # converte 1–7 → 0–6
+            except ValueError:
+                print(f"Cartella ignorata (non numerica): {folder}")
+                continue
+
+            for fname in os.listdir(folder_path):
+                if fname.lower().endswith(('.jpg', '.png', '.jpeg')):
+                    self.file_paths.append(os.path.join(folder_path, fname))
+                    self.target.append(label)
+
         self.file_paths = np.array(self.file_paths)
+        self.target = np.array(self.target)
+
+        # === Gestione subset opzionale ===
         if self.dataidxs is not None:
             self.file_paths = self.file_paths[self.dataidxs]
             self.target = self.target[self.dataidxs]
-        else:
-            self.file_paths = self.file_paths
         self.file_paths = self.file_paths.tolist()
+
+        print(f"Caricate {len(self.file_paths)} immagini da {split_dir}/ ({len(set(self.target))} classi)")
 
 
     def __len__(self):
