@@ -4,6 +4,15 @@ from torch import nn, Tensor
 from torch.autograd import Variable
 from torch.nn import functional as F
 from typing import Tuple
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+
+def train_val_split(csv_file, val_ratio=0.2, random_seed=42):
+    df = pd.read_csv(csv_file)
+    train_idx, val_idx = train_test_split(np.arange(len(df)), test_size=val_ratio, random_state=random_seed, stratify=df['emotion'])
+    return train_idx, val_idx
+
 
 def convert_label_to_similarity(normed_feature: Tensor, label: Tensor) -> Tuple[Tensor, Tensor]:
     similarity_matrix = normed_feature @ normed_feature.transpose(1, 0)
@@ -144,7 +153,9 @@ def CB_loss(labels, logits, samples_per_cls, no_of_classes, loss_type, beta, gam
 
     labels_one_hot = F.one_hot(labels, no_of_classes).float()
 
-    weights = torch.tensor(weights).float().cuda()
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+
+    weights = torch.tensor(weights).float().to(device)
     weights = weights.unsqueeze(0)
     weights = weights.repeat(labels_one_hot.shape[0], 1) * labels_one_hot
     weights = weights.sum(1)
