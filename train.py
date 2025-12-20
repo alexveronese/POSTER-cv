@@ -51,6 +51,7 @@ def parse_args():
     parser.add_argument('--workers', default=2, type=int, help='Number of dataset loader workers')
     parser.add_argument('--epochs', type=int, default=300, help='Number of training epochs')
     parser.add_argument('--gpu', type=str, default='0,1', help='Comma-separated list of GPUs to use')
+    parser.add_argument('--lora', action='store_true', help='Enable LoRA fine-tuning')
     parser.add_argument('--loss', type=str, default='CE_loss', help='Loss function')    # alternative CB_loss
     parser.add_argument('--sampler', type=str, default='imbalanced', help='ImbalancedDatasetSampler')   # pass 'balanced' if you want to do the balance
     parser.add_argument('--lighting', action='store_true', help='Enable lighting augmentation')     # if '--lighting' is passed, args.lighting == True
@@ -101,7 +102,7 @@ def run_training():
         val_dataset = RafDataSet(datapath, train=False, transform=data_transforms_val)
 
         # Create the model with specified type and input config
-        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype)
+        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
     elif args.dataset == "affectnet":
         datapath = './dataset/AffectNetDataSet/'
 
@@ -112,7 +113,7 @@ def run_training():
         val_dataset = Affectdataset(datapath, train=False, transform=data_transforms_val)
 
         # Create the model with specified type and input config
-        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype)
+        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
     elif args.dataset == "ferplus":
         datapath = './dataset/FerPlusDataSet/'
 
@@ -121,7 +122,7 @@ def run_training():
         val_dataset = FerPlusDataSet(datapath, train=False, transform=data_transforms_val)
 
         # Create the model with specified type and input config
-        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype)
+        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
     elif args.dataset == "ck+":
         datapath = './dataset/CK+DataSet/ckextended.csv'
         num_classes = 8
@@ -136,7 +137,7 @@ def run_training():
         val_dataset = CKplusDataSet(datapath, train=False, transform=val_transform, basic_aug=False, dataidxs=val_idx)
 
         # Create the model with specified type and input config
-        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype)
+        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
     else:
         # Handle unsupported dataset name
         return print('dataset name is not correct')
@@ -325,11 +326,29 @@ def run_training():
 
             # Save checkpoint if validation accuracy improves beyond threshold
             if val_acc > 0.907 and val_acc > best_acc:
-                torch.save({'iter': i,
-                            'model_state_dict': model.state_dict(),
-                            'optimizer_state_dict': optimizer.state_dict(), },
-                           os.path.join('./checkpoint', "epoch" + str(i) + "_acc" + str(val_acc) + ".pth"))
-                print('Model saved.')
+                raw_model = model.module  # Accedi al modello non-DataParallel
+
+                save_data = {
+                    'iter': i,
+                    'optimizer_state_dict': optimizer.state_dict(),
+                }
+
+                if args.lora:
+                    # Se è LoRA, salva solo l'adattatore PEFT
+                    # Il modulo PEFT è self.pyramid_fuse nel modello base
+                    lora_adapter = raw_model.pyramid_fuse
+                    adapter_path = os.path.join('./checkpoint', f"lora_adapter_epoch{i}_acc{val_acc:.4f}.pth")
+
+                    # PeftModel non ha save_pretrained sul sottomodulo, usiamo torch.save sul dict.
+                    # Questo salva solo i pesi LoRA e gli head finali (che sono allenabili).
+                    torch.save(raw_model.state_dict(), adapter_path)
+                    print(f'LoRA Adapter saved to {adapter_path}.')
+                else:
+                    # Altrimenti, salva l'intero modello
+                    save_data['model_state_dict'] = raw_model.state_dict()
+                    full_model_path = os.path.join('./checkpoint', "epoch" + str(i) + "_acc" + str(val_acc) + ".pth")
+                    torch.save(save_data, full_model_path)
+                    print(f'Full Model saved to {full_model_path}.')
 
             if val_acc > best_acc:
                 best_acc = val_acc
