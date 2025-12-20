@@ -30,6 +30,8 @@ class CKplusDataSet(data.Dataset):
         if self.dataidxs is not None:
             self.data_frame = self.data_frame.iloc[self.dataidxs].reset_index(drop=True)
 
+        self.target = self.data_frame["emotion"].astype(int).tolist()
+
     def __len__(self):
         return len(self.data_frame)
 
