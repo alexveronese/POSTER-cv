@@ -6,8 +6,6 @@ from torch.nn import functional as F
 from typing import Tuple
 import pandas as pd
 from sklearn.model_selection import train_test_split
-import cv2
-from models.emotion_hyp import pyramid_trans_expr
 
 
 def train_val_split(csv_file, val_ratio=0.2, random_seed=42):
@@ -600,86 +598,3 @@ def load_pretrained_weights(model, checkpoint):
 #         # f.write("%s\n" % item)
 #         f.write("%s.jpg %s\n" % (id_file[i], label[i]))
 #     f.close()
-
-class GradCAM:
-    """Implementazione di base di Grad-CAM."""
-
-    def __init__(self, model, target_layer_name):
-        self.model = model
-        self.target_layer = None
-        self.gradients = None
-        self.activations = None
-
-        # Assicurati che il modello sia in modalità eval
-        self.model.eval()
-
-        # Trova il layer target usando il nome completo (es. 'ir_back.layer4')
-        for name, module in self.model.named_modules():
-            if name == target_layer_name:
-                self.target_layer = module
-                break
-
-        if self.target_layer is None:
-            raise ValueError(f"Layer target '{target_layer_name}' non trovato nel modello.")
-
-        # Registra gli hook
-        self.target_layer.register_forward_hook(self._forward_hook)
-        self.target_layer.register_backward_hook(self._backward_hook)
-
-    def _forward_hook(self, module, input, output):
-        self.activations = output.detach()  # Cattura le mappe di feature
-
-    def _backward_hook(self, module, grad_input, grad_output):
-        self.gradients = grad_output[0].detach()  # Cattura il gradiente
-
-    def __call__(self, input_tensor, target_class=None):
-        self.model.zero_grad()
-
-        # Forward pass
-        output, _ = self.model(input_tensor)  # Il modello restituisce (out, y_feat)
-
-        if target_class is None:
-            # Usa la classe con il punteggio più alto
-            target_class = output.argmax(dim=1).item()
-
-        # Backward pass per la classe target
-        one_hot = torch.zeros_like(output).scatter_(1, torch.tensor([target_class]).to(output.device), 1.0)
-        output.backward(gradient=one_hot, retain_graph=False)  # retain_graph=False per liberare memoria
-
-        # Calcola i pesi (Global Average Pooling dei gradienti)
-        # La forma di self.gradients è [B, C, H, W]
-        weights = torch.mean(self.gradients, dim=(2, 3), keepdim=True)
-
-        # Calcola la CAM: Pesi * Attivazioni, poi ReLU
-        cam = weights * self.activations
-        cam = cam.sum(dim=1, keepdim=True)
-        cam = F.relu(cam)
-
-        # Normalizzazione e Upsampling alla dimensione dell'input (224x224)
-        original_size = (input_tensor.shape[2], input_tensor.shape[3])
-        cam = F.interpolate(cam, size=original_size, mode='bilinear', align_corners=False)
-
-        # Normalizzazione finale tra 0 e 1
-        cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
-
-        return cam.squeeze().cpu().numpy(), target_class
-
-
-def overlay_cam(image, cam_map, alpha=0.4):
-    """Sovrappone la CAM all'immagine originale per la visualizzazione."""
-    # Converte l'immagine PyTorch normalizzata in formato OpenCV (HWC, BGR, [0, 255])
-    # Dobbiamo invertire la normalizzazione se l'immagine è un tensor.
-    # Assumiamo che 'image' sia l'array numpy originale [H, W, C]
-
-    # 1. Ricalcola la heatmap
-    heatmap = cv2.applyColorMap(np.uint8(255 * cam_map), cv2.COLORMAP_JET)
-    heatmap = np.float32(heatmap) / 255
-
-    # 2. Converte l'immagine originale (che è BGR/RGB)
-    img_display = np.float32(image) / 255
-
-    # 3. Sovrapposizione ponderata
-    cam_overlay = (1 - alpha) * img_display + alpha * heatmap
-    cam_overlay = cam_overlay / cam_overlay.max()  # Assicura che i valori siano [0, 1]
-
-    return np.uint8(255 * cam_overlay)
