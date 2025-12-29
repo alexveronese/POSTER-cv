@@ -5,7 +5,6 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 from torch.nn import functional as F
 
-from peft import LoraConfig, get_peft_model, TaskType
 from .hyp_crossvit import *
 from .mobilefacenet import MobileFaceNet
 from .ir50 import Backbone
@@ -70,7 +69,7 @@ class ClassificationHead(nn.Module):
 
 
 class pyramid_trans_expr(nn.Module):
-    def __init__(self, img_size=224, num_classes=7, type="large", use_lora=False):
+    def __init__(self, img_size=224, num_classes=7, type="large"):
         super().__init__()
         depth = 8
         if type == "small":
@@ -84,7 +83,7 @@ class pyramid_trans_expr(nn.Module):
         self.num_classes = num_classes
 
         self.face_landback = MobileFaceNet([112, 112],136)
-        face_landback_checkpoint = torch.load('./models/pretrain/mobilefacenet_model_best.pth.tar', map_location=lambda storage, loc: storage)
+        face_landback_checkpoint = torch.load('./POSTER/models/pretrain/mobilefacenet_model_best.pth.tar', map_location=lambda storage, loc: storage)
         self.face_landback.load_state_dict(face_landback_checkpoint['state_dict'])
 
 
@@ -95,15 +94,11 @@ class pyramid_trans_expr(nn.Module):
 
 
         self.ir_back = Backbone(50, 0.0, 'ir')
-        ir_checkpoint = torch.load('./models/pretrain/ir50.pth', map_location=lambda storage, loc: storage)
+        ir_checkpoint = torch.load('./POSTER/models/pretrain/ir50.pth', map_location=lambda storage, loc: storage)
         # ir_checkpoint = ir_checkpoint["model"]
         self.ir_back = load_pretrained_weights(self.ir_back, ir_checkpoint)
-        for param in self.ir_back.parameters():
-            param.requires_grad = False
 
         self.ir_layer = nn.Linear(1024,512)
-        for param in self.ir_layer.parameters():
-            param.requires_grad = False
 
         #############################################################3
 
@@ -111,21 +106,6 @@ class pyramid_trans_expr(nn.Module):
                                              depth=depth, num_heads=8, mlp_ratio=2.,
                                              drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1)
 
-        if use_lora:
-            print("Applying LoRA to HyVisionTransformer...")
-            lora_config = LoraConfig(
-                r=8,  # Rank del LoRA (minore è, più piccolo è l'adattatore)
-                lora_alpha=16,  # Scaling (di solito 2*r)
-                # I nomi dei layer lineari
-                target_modules=["kv", "proj", "fc1", "fc2"],
-                lora_dropout=0.1,
-                bias="none",
-                task_type=TaskType.FEATURE_EXTRACTION
-            )
-            self.pyramid_fuse = get_peft_model(self.pyramid_fuse, lora_config)
-
-            # Opzionale: stampa i parametri allenabili per verifica (utile nel debug)
-            # self.pyramid_fuse.print_trainable_parameters()
 
         self.se_block = SE_block(input_dim=512)
         self.head = ClassificationHead(input_dim=512, target_dim=self.num_classes)
