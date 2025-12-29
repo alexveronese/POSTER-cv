@@ -60,7 +60,7 @@ class RafDataSet(data.Dataset):
                 continue
 
             # Iterate all images in folder and record their paths and labels
-            for fname in os.listdir(folder_path):
+            for fname in sorted(os.listdir(folder_path)):
                 if fname.lower().endswith(('.jpg', '.png', '.jpeg')):
                     self.file_paths.append(os.path.join(folder_path, fname))
                     self.target.append(label)
