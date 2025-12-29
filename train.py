@@ -185,7 +185,14 @@ def run_training():
         pin_memory=True)
 
     # Wrap model for multi-GPU dataset parallelism
-    model = torch.nn.DataParallel(model)
+    #model = torch.nn.DataParallel(model)
+    # Attiva DataParallel solo se SLURM ti ha dato più di 1 GPU
+    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        print(f"Rilevate {torch.cuda.device_count()} GPU. Attivo DataParallel.")
+        model = torch.nn.DataParallel(model)
+    else:
+        print("Utilizzo singola GPU/CPU (DataParallel disattivato).")
+    
     model = model.to(device)
 
     print("batch_size:", args.batch_size)
