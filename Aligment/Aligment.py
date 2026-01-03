@@ -1,165 +1,173 @@
-# Aligment.py
-from PIL import Image
+import os
 import cv2
 import numpy as np
-import argparse
-from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from tqdm import tqdm
-from PIL import Image
 
-def align_image(img, reference=None, reference_path='test_0015_aligned.jpg',
-                nfeatures=2000, min_match_count=8, return_type='pil', scale_for_detection=None):
+# Sostituito l'uso di dlib con MTCNN (facenet-pytorch) per rilevamento dei volti e dei 5 keypoints
+# I keypoints restituiti sono: left_eye, right_eye, nose, mouth_left, mouth_right
+try:
+    from facenet_pytorch import MTCNN
+    import torch
+except Exception as e:
+    raise RuntimeError("Installa 'facenet-pytorch' e 'torch' (es. 'pip install facenet-pytorch torch') per eseguire questo script") from e
+
+
+class AlignerMtcnn:
+    """Classe che espone le funzioni di allineamento basate su MTCNN.
+
+    Mantiene la stessa concettualità del file originale:
+    - metodo `get_face_keypoints_mtcnn(image_bgr)` che ritorna (5,2) o None
+    - metodo `align_to_image(img_src, img_dst)` che restituisce `img_src` warpAffine allineata a `img_dst`
+
+    In aggiunta fornisce `align_to_template(img, out_size=(W,H))` e `__call__(img)` utili per inserirla nei `transforms`.
+
+    Note:
+    - Accetta immagini numpy HxWx3 (RGB o BGR); usa un'euristica interna per passare al detector in formato RGB.
+    - Per l'uso nei transforms `__call__` ritorna un'immagine RGB di dimensione `out_size`.
     """
-    Allinea `img` verso `reference` (o `reference_path`).
-    `img`/`reference` possono essere: path str, PIL.Image, numpy.ndarray (RGB/BGR/gray).
-    return_type: 'pil' (default), 'opencv' (BGR numpy), 'rgb_numpy'
-    scale_for_detection: riduce temporaneamente la risoluzione per velocizzare il detection (es. 0.5)
-    """
-    def _load_to_bgr(x):
-        if isinstance(x, str):
-            bgr = cv2.imread(x)
-            if bgr is None:
-                raise FileNotFoundError(f"Cannot read image: {x}")
-            return bgr
-        if isinstance(x, Image.Image):
-            return cv2.cvtColor(np.array(x), cv2.COLOR_RGB2BGR)
-        if isinstance(x, np.ndarray):
-            if x.ndim == 2:
-                return cv2.cvtColor(x, cv2.COLOR_GRAY2BGR)
-            # assume RGB if 3 channels
-            return cv2.cvtColor(x, cv2.COLOR_RGB2BGR) if x.shape[2] == 3 else x
-        raise TypeError("Unsupported image type")
 
-    img_bgr = _load_to_bgr(img)
-    ref_bgr = _load_to_bgr(reference if reference is not None else reference_path)
+    def __init__(self, device=None, keep_all=False, out_size=(224, 224), fallback_to_original=True):
+        self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.mtcnn = MTCNN(keep_all=keep_all, device=self.device)
+        self.out_size = tuple(out_size)
+        self.fallback_to_original = fallback_to_original
 
-    ref_gray = cv2.cvtColor(ref_bgr, cv2.COLOR_BGR2GRAY)
-    img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    def _to_rgb_for_detector(self, img: np.ndarray) -> np.ndarray:
+        """Ritorna immagine RGB adatta a MTCNN. Accetta RGB o BGR in input."""
+        img = np.asarray(img)
+        if img.ndim != 3 or img.shape[2] != 3:
+            raise ValueError("L'immagine deve essere HxWx3")
 
-    # Optionally scale down for detection to speed up
-    if scale_for_detection is not None and 0 < scale_for_detection < 1.0:
-        def _rescale(img, s):
-            h, w = img.shape[:2]
-            return cv2.resize(img, (int(w * s), int(h * s)))
-        img_gray_small = _rescale(img_gray, scale_for_detection)
-        ref_gray_small = _rescale(ref_gray, scale_for_detection)
-    else:
-        img_gray_small, ref_gray_small = img_gray, ref_gray
+        # euristica semplice per distinguere BGR da RGB: confronto medie canali
+        b_mean = img[:, :, 0].mean()
+        r_mean = img[:, :, 2].mean()
+        if b_mean > r_mean:
+            # probabilmente BGR
+            return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        else:
+            # probabilmente già RGB
+            return img.copy()
 
-    orb = cv2.ORB_create(nfeatures)
-    kp1, des1 = orb.detectAndCompute(ref_gray_small, None)
-    kp2, des2 = orb.detectAndCompute(img_gray_small, None)
+    def get_face_keypoints_mtcnn(self, image_bgr: np.ndarray):
+        """Ritorna un array (5,2) con i punti (x,y) in float32 o None se non trova volti.
 
-    # if descriptors missing, fallback: return original image converted to requested format
-    if des1 is None or des2 is None or len(kp1) < 4 or len(kp2) < 4:
-        return _fallback(img_bgr, return_type)
+        Mantiene la firma del file originale (accetta immagini BGR), ma funziona anche con RGB.
+        """
+        if image_bgr is None:
+            return None
 
-    bf = cv2.BFMatcher(cv2.NORM_HAMMING)
-    knn_matches = bf.knnMatch(des1, des2, k=2)
-    good = []
-    for m_n in knn_matches:
-        if len(m_n) != 2:
-            continue
-        m, n = m_n
-        if m.distance < 0.75 * n.distance:  # Lowe's ratio test
-            good.append(m)
+        image_rgb = self._to_rgb_for_detector(image_bgr)
 
-    if len(good) < min_match_count:
-        return _fallback(img_bgr, return_type)
+        boxes, probs, landmarks = self.mtcnn.detect(image_rgb, landmarks=True)
+        # landmarks: array (n,5,2) in formato (x,y)
+        if landmarks is None or len(landmarks) == 0:
+            return None
 
-    # recover keypoints coordinates in original scale (if scaling used)
-    if scale_for_detection is not None and 0 < scale_for_detection < 1.0:
-        scale = 1.0 / scale_for_detection
-        pts_ref = np.float32([ (kp1[m.queryIdx].pt[0]*scale, kp1[m.queryIdx].pt[1]*scale) for m in good ]).reshape(-1,1,2)
-        pts_img = np.float32([ (kp2[m.trainIdx].pt[0]*scale, kp2[m.trainIdx].pt[1]*scale) for m in good ]).reshape(-1,1,2)
-    else:
-        pts_ref = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1,1,2)
-        pts_img = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1,1,2)
+        pts = landmarks[0].astype(np.float32)
+        return pts
 
-    H, mask = cv2.findHomography(pts_img, pts_ref, cv2.RANSAC, 5.0)
-    if H is None:
-        return _fallback(img_bgr, return_type)
+    def compute_affine(self, src_pts: np.ndarray, dst_pts: np.ndarray):
+        """Calcola la trasformazione affine (estimateAffinePartial2D) e la ritorna."""
+        if src_pts is None or dst_pts is None:
+            return None
+        M, inliers = cv2.estimateAffinePartial2D(src_pts, dst_pts)
+        return M
 
-    h_ref, w_ref = ref_gray.shape
-    aligned = cv2.warpPerspective(img_bgr, H, (w_ref, h_ref), flags=cv2.INTER_LINEAR)
+    def align_to_image(self, img_src: np.ndarray, img_dst: np.ndarray):
+        """Allinea `img_src` su `img_dst` usando i 5 keypoints rilevati su entrambi.
 
-    if return_type == 'opencv':
+        Restituisce l'immagine allineata in BGR (stessa convenzione di cv2.imread).
+        Se non si trovano keypoints, lancia RuntimeError (come il file originale).
+        """
+        if img_src is None or img_dst is None:
+            raise RuntimeError("img_src o img_dst è None")
+
+        kp_src = self.get_face_keypoints_mtcnn(img_src)
+        kp_dst = self.get_face_keypoints_mtcnn(img_dst)
+
+        if kp_src is None or kp_dst is None:
+            raise RuntimeError("Volto non rilevato in una delle immagini")
+
+        M = self.compute_affine(kp_src, kp_dst)
+        if M is None:
+            raise RuntimeError("Impossibile calcolare la trasformazione affine")
+
+        h_dst, w_dst = img_dst.shape[:2]
+        aligned = cv2.warpAffine(img_src, M, (w_dst, h_dst))
         return aligned
-    rgb = cv2.cvtColor(aligned, cv2.COLOR_BGR2RGB)
-    if return_type == 'rgb_numpy':
-        return rgb
-    return Image.fromarray(rgb)
 
-def _fallback(img_bgr, return_type):
-    if return_type == 'opencv':
-        return img_bgr
-    rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    if return_type == 'rgb_numpy':
-        return rgb
-    return Image.fromarray(rgb)
+    def _canonical_dst(self, out_size=None):
+        W, H = (out_size or self.out_size)
+        return np.array([
+            [0.35 * W, 0.35 * H],  # left eye
+            [0.65 * W, 0.35 * H],  # right eye
+            [0.50 * W, 0.50 * H],  # nose
+            [0.37 * W, 0.75 * H],  # mouth left
+            [0.63 * W, 0.75 * H],  # mouth right
+        ], dtype=np.float32)
 
+    def align_to_template(self, img_src: np.ndarray, out_size=None):
+        """Allinea `img_src` a una posizione canonica e ritorna immagine RGB out_size x out_size.
 
+        - Se non trova un volto e fallback_to_original=True, ritorna l'immagine ridimensionata a `out_size`.
+        - Ideale per l'uso come transform `__call__`.
+        """
+        if img_src is None:
+            return None
 
-def process_file(src_path, dst_path, ref, min_match_count, scale_for_detection, copy_on_fail):
-    dst_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        out = align_image(str(src_path), reference=ref, min_match_count=min_match_count, scale_for_detection=scale_for_detection, return_type='pil')
-        out.save(dst_path, quality=95)
-        return True, str(src_path)
-    except Exception as e:
-        if copy_on_fail:
-            # copy original
-            Image.open(src_path).convert('RGB').save(dst_path, quality=95)
-            return False, f"{src_path} (copied original due to error: {e})"
-        return False, f"{src_path} (failed: {e})"
-
-def main(args):
-    src = Path(args.src)
-    dst = Path(args.dst)
-    assert src.exists()
-
-    # Gather images
-    exts = ('*.jpg','*.jpeg','*.png','*.bmp')
-    files = []
-    for e in exts:
-        files += list(src.rglob(e))
-    if args.max_files:
-        files = files[:args.max_files]
-
-    total = len(files)
-    print(f"Found {total} files to process.")
-
-    # load reference image if provided path
-    ref = args.reference
-
-    failures = []
-    success = 0
-    with ProcessPoolExecutor(max_workers=args.workers) as ex:
-        futures = { ex.submit(process_file, f, dst / f.relative_to(src), ref, args.min_match_count, args.scale_for_detection, args.copy_on_fail): f for f in files }
-        for fut in tqdm(as_completed(futures), total=total):
-            ok, msg = fut.result()
-            if ok:
-                success += 1
+        out_size = out_size or self.out_size
+        kp_src = self.get_face_keypoints_mtcnn(img_src)
+        if kp_src is None:
+            if self.fallback_to_original:
+                resized = cv2.resize(img_src, (out_size[0], out_size[1]), interpolation=cv2.INTER_LINEAR)
+                # Assicuriamoci che sia RGB
+                rgb = self._to_rgb_for_detector(resized)
+                return rgb
             else:
-                failures.append(msg)
+                raise RuntimeError("Nessun volto trovato nell'immagine")
 
-    print(f"Done. Success: {success}/{total}. Failures: {len(failures)}")
-    if failures:
-        with open(dst / "alignment_failures.log", "w") as fh:
-            fh.write("\n".join(failures))
+        dst = self._canonical_dst(out_size)
+        M = self.compute_affine(kp_src, dst)
+        if M is None:
+            if self.fallback_to_original:
+                resized = cv2.resize(img_src, (out_size[0], out_size[1]), interpolation=cv2.INTER_LINEAR)
+                rgb = self._to_rgb_for_detector(resized)
+                return rgb
+            else:
+                raise RuntimeError("Impossibile calcolare la trasformazione affine per l'allineamento")
 
+        # applichiamo la warp su immagine in formato RGB (per compatibilità con transforms)
+        # se l'input era BGR, _to_rgb_for_detector lo ha convertito correttamente
+        img_rgb = self._to_rgb_for_detector(img_src)
+        aligned = cv2.warpAffine(img_rgb, M, (out_size[0], out_size[1]), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        return aligned
+
+    def __call__(self, img):
+        """Convenienza: rende l'oggetto utilizzabile come Transform.
+
+        Restituisce immagine RGB `out_size` pronta per essere passata a `transforms.ToPILImage()`.
+        """
+        return self.align_to_template(img)
+
+# se runno diretto esegui un test semplice
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--src', required=True, help="AffectNet train/test root (ImageFolder structure)")
-    parser.add_argument('--dst', required=True, help="Output root to write aligned images (will preserve subfolders)")
-    parser.add_argument('--reference', required=True, help="Reference image path")
-    parser.add_argument('--workers', type=int, default=8)
-    parser.add_argument('--min_match_count', type=int, default=8)
-    parser.add_argument('--scale_for_detection', type=float, default=None, help="Optional scale (0-1) to speed up detection, e.g. 0.5")
-    parser.add_argument('--copy-on-fail', action='store_true', help="If set, copy original image when alignment fails")
-    parser.add_argument('--max-files', type=int, default=0, help="Limit number of files (for testing)")
-    args = parser.parse_args()
-    if args.max_files == 0:
-        args.max_files = None
-    main(args)
+    aligner = AlignerMtcnn()
+
+    img_src_path = "Dataset/image0000060.jpg"
+    img_dst_path = "Dataset/image0000416.jpg"
+
+    img_src = cv2.imread(img_src_path)
+    img_dst = cv2.imread(img_dst_path)
+
+    if img_src is None:
+        raise RuntimeError(f"img_src = None (path sbagliato o file non leggibile): {img_src_path}")
+    if img_dst is None:
+        raise RuntimeError(f"img_dst = None (path sbagliato o file non leggibile): {img_dst_path}")
+
+    aligned = aligner.align_to_image(img_src, img_dst)
+
+    cv2.imshow("Original Source", img_src)
+    cv2.imshow("Aligned Source", aligned)
+    cv2.imshow("Target", img_dst)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
