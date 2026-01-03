@@ -51,6 +51,7 @@ def parse_args():
     parser.add_argument('--workers', default=2, type=int, help='Number of dataset loader workers')
     parser.add_argument('--epochs', type=int, default=300, help='Number of training epochs')
     parser.add_argument('--gpu', type=str, default='0,1', help='Comma-separated list of GPUs to use')
+    parser.add_argument('--lora', action='store_true', help='Enable LoRA fine-tuning')
     parser.add_argument('--loss', type=str, default='CE_loss', help='Loss function')    # alternative CB_loss
     parser.add_argument('--sampler', type=str, default='imbalanced', help='ImbalancedDatasetSampler')   # pass 'balanced' if you want to do the balance
     parser.add_argument('--lighting', action='store_true', help='Enable lighting augmentation')     # if '--lighting' is passed, args.lighting == True
@@ -100,11 +101,11 @@ def run_training():
         train_dataset = RafDataSet(datapath, train=True, transform=train_transform, basic_aug=True)
         val_dataset = RafDataSet(datapath, train=False, transform=data_transforms_val)
         # Sostituisci la riga del print che ha dato errore con questa:
-        print("Esempio prime 3 label del train:", [train_dataset[i][1] for i in range(3)])
-        print("Esempio prime 3 label del test :", [val_dataset[i][1] for i in range(3)])
+        #print("Esempio prime 3 label del train:", [train_dataset[i][1] for i in range(3)])
+        #print("Esempio prime 3 label del test :", [val_dataset[i][1] for i in range(3)])
 
         # Create the model with specified type and input config
-        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype)
+        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
     elif args.dataset == "affectnet":
         datapath = './POSTER/dataset/AffectNetDataSet/'
 
@@ -115,7 +116,7 @@ def run_training():
         val_dataset = Affectdataset(datapath, train=False, transform=data_transforms_val)
 
         # Create the model with specified type and input config
-        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype)
+        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
     elif args.dataset == "ferplus":
         datapath = './POSTER/dataset/FerPlusDataSet/'
 
@@ -124,7 +125,7 @@ def run_training():
         val_dataset = FerPlusDataSet(datapath, train=False, transform=data_transforms_val)
 
         # Create the model with specified type and input config
-        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype)
+        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
     elif args.dataset == "ck+":
         datapath = './POSTER/dataset/CK+DataSet/ckextended.csv'
         num_classes = 8
@@ -139,7 +140,7 @@ def run_training():
         val_dataset = CKplusDataSet(datapath, train=False, transform=val_transform, basic_aug=False, dataidxs=val_idx)
 
         # Create the model with specified type and input config
-        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype)
+        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
     else:
         # Handle unsupported dataset name
         return print('dataset name is not correct')
@@ -165,7 +166,7 @@ def run_training():
         sampler = None
         shuffle_sampler = True
 
-    print(f"Shuffle value: {shuffle_sampler}")    
+    #print(f"Shuffle value: {shuffle_sampler}")
 
     # Create DataLoader for training with the balanced sampler and appropriate settings
     train_loader = torch.utils.data.DataLoader(
@@ -192,7 +193,7 @@ def run_training():
         model = torch.nn.DataParallel(model)
     else:
         print("Utilizzo singola GPU/CPU (DataParallel disattivato).")
-    
+
     model = model.to(device)
 
     print("batch_size:", args.batch_size)
@@ -200,7 +201,7 @@ def run_training():
     # Load pretrained weights if checkpoint specified
     if args.checkpoint:
         print("Loading pretrained weights...", args.checkpoint)
-        checkpoint = torch.load(args.checkpoint)
+        checkpoint = torch.load(args.checkpoint, map_location=device)
         checkpoint = checkpoint["model_state_dict"]
         model = load_pretrained_weights(model, checkpoint)
 
@@ -339,11 +340,29 @@ def run_training():
 
             # Save checkpoint if validation accuracy improves beyond threshold
             if val_acc > 0.907 and val_acc > best_acc:
-                torch.save({'iter': i,
-                            'model_state_dict': model.state_dict(),
-                            'optimizer_state_dict': optimizer.state_dict(), },
-                           os.path.join('./POSTER/checkpoint', "epoch" + str(i) + "_acc" + str(val_acc) + ".pth"))
-                print('Model saved.')
+                # 1. Ottieni il modello base (gestione DataParallel)
+                model_to_save = model.module if isinstance(model, torch.nn.DataParallel) else model
+
+                # 2. Prepara lo stato da salvare
+                # Se pyramid_fuse è un PeftModel, usiamo il suo metodo interno
+                # Altrimenti salviamo tutto lo state_dict pulito
+                if args.lora:
+                    full_dict = model_to_save.state_dict()
+                    state_to_save = {
+                        k: v for k, v in full_dict.items()
+                        if "lora_" in k or "head" in k or "se_block" in k or "ir_layer" in k
+                    }
+                    print("Saving LoRA adapters + Heads...")
+                else:
+                    state_to_save = model_to_save.state_dict()
+                    print("Saving Full Model...")
+
+                # 3. Salvataggio effettivo
+                torch.save({
+                    'iter': i,
+                    'model_state_dict': state_to_save,
+                    'optimizer_state_dict': optimizer.state_dict(),
+                }, os.path.join('./POSTER/checkpoint', f"epoch{i}_acc{val_acc:.4f}.pth"))
 
             if val_acc > best_acc:
                 best_acc = val_acc

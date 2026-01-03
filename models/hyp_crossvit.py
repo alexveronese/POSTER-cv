@@ -241,7 +241,7 @@ class HyVisionTransformer(nn.Module):
 
 
 
-    def forward(self, x, x_lm):
+    def forward(self, x, x_lm, **kwargs):
         B = x.shape[0]
         x_cls = torch.mean(x, 1).view(B,1,-1)
         x = torch.cat((x_cls, x), dim=1)

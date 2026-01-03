@@ -5,6 +5,7 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 from torch.nn import functional as F
 
+from peft import LoraConfig, get_peft_model, TaskType
 from .hyp_crossvit import *
 from .mobilefacenet import MobileFaceNet
 from .ir50 import Backbone
@@ -69,7 +70,7 @@ class ClassificationHead(nn.Module):
 
 
 class pyramid_trans_expr(nn.Module):
-    def __init__(self, img_size=224, num_classes=7, type="large"):
+    def __init__(self, img_size=224, num_classes=7, type="large", use_lora=False):
         super().__init__()
         depth = 8
         if type == "small":
@@ -97,8 +98,15 @@ class pyramid_trans_expr(nn.Module):
         ir_checkpoint = torch.load('./POSTER/models/pretrain/ir50.pth', map_location=lambda storage, loc: storage)
         # ir_checkpoint = ir_checkpoint["model"]
         self.ir_back = load_pretrained_weights(self.ir_back, ir_checkpoint)
+        if use_lora:
+            for param in self.ir_back.parameters():
+                param.requires_grad = False
 
         self.ir_layer = nn.Linear(1024,512)
+
+        if use_lora:
+            for param in self.ir_layer.parameters():
+                param.requires_grad = False
 
         #############################################################3
 
@@ -106,6 +114,26 @@ class pyramid_trans_expr(nn.Module):
                                              depth=depth, num_heads=8, mlp_ratio=2.,
                                              drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1)
 
+        if use_lora:
+            print("Applying LoRA to HyVisionTransformer...")
+            lora_config = LoraConfig(
+                r=64,  # 32 or 64
+                lora_alpha=128,  # Scaling (2*r)
+                # I nomi dei layer lineari
+                target_modules=["kv", "proj", "fc1", "fc2"],
+                lora_dropout=0.1,
+                bias="none",
+                task_type=None
+            )
+            self.pyramid_fuse = get_peft_model(self.pyramid_fuse, lora_config)
+
+            #print("--- Elenco nomi layer nel modulo pyramid_fuse ---")
+            #for name, module in self.pyramid_fuse.named_modules():
+            #    print(name)
+            #print("-------------------------------------------------")
+
+            # Opzionale: stampa i parametri allenabili per verifica (utile nel debug)
+            # self.pyramid_fuse.print_trainable_parameters()
 
         self.se_block = SE_block(input_dim=512)
         self.head = ClassificationHead(input_dim=512, target_dim=self.num_classes)
@@ -121,8 +149,12 @@ class pyramid_trans_expr(nn.Module):
         x_ir = self.ir_back(x)
         x_ir = self.ir_layer(x_ir)
         ###############  image x_ir ([B, 49, 512])
+        # AGGIUNGI QUESTE RIGHE PER IL DEBUG:
+        #print(f"DEBUG - x_ir shape: {x_ir.shape}")
+        #print(f"DEBUG - x_face shape: {x_face.shape}")
+        #print(f"DEBUG - pyramid_fuse type: {type(self.pyramid_fuse)}")
 
-        y_hat = self.pyramid_fuse(x_ir, x_face)
+        y_hat = self.pyramid_fuse(x=x_ir, x_lm=x_face)
         y_hat = self.se_block(y_hat)
         y_feat = y_hat
         out = self.head(y_hat)
