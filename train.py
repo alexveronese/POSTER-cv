@@ -1,3 +1,5 @@
+from ast import arg
+from re import A
 import warnings
 
 # Ignore warning messages to keep output clean
@@ -41,6 +43,7 @@ def parse_args():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='rafdb', help='dataset name')
+    parser.add_argument('--alignment', type=str, default='false', help='true or false, whether to use aligned images')
     parser.add_argument('-c', '--checkpoint', type=str, default=None, help='Path to PyTorch checkpoint file')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
     parser.add_argument('--val_batch_size', type=int, default=32, help='Batch size for validation')
@@ -70,7 +73,7 @@ def run_training():
     device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
     print("Using device:", device)
 
-    # Define augmentation pipeline for training dataset
+    # Default data transforms (resize, normalize)
     data_transforms = transforms.Compose([
         transforms.ToPILImage(),                 # Convert ndarray to PIL Image
         transforms.Resize((224, 224)),           # Resize to 224x224
@@ -87,6 +90,34 @@ def run_training():
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
     ])
+    
+    if args.alignment.lower() == 'true':
+        try:
+            # import locale per evitare dipendenza se --alignment non è usato
+            from Aligment.Aligment import AlignerMtcnn
+            # istanzia su CPU per sicurezza con num_workers > 0
+            aligner = AlignerMtcnn(device='cpu', out_size=(224, 224))
+        except Exception as e:
+            raise RuntimeError("Allineamento richiesto ma AlignerMtcnn o le sue dipendenze non sono disponibili: " + str(e))
+        print("Allineamento delle immagini abilitato.")
+
+        data_transforms = transforms.Compose([
+            AlignerMtcnn(device='cpu', out_size=(224, 224)),  # Allinea l'immagine
+            transforms.ToPILImage(),
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+        ])
+        data_transforms_val = transforms.Compose([
+            AlignerMtcnn(device='cpu', out_size=(224, 224)),  # Allinea l'immagine
+            transforms.ToPILImage(),
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+        ])
+        
 
     num_classes = 7
     use_lighting = getattr(args, 'lighting', False)
@@ -99,7 +130,7 @@ def run_training():
 
         # Initialize training and validation datasets
         train_dataset = RafDataSet(datapath, train=True, transform=train_transform, basic_aug=True)
-        val_dataset = RafDataSet(datapath, train=False, transform=data_transforms_val)
+        val_dataset = RafDataSet(datapath, train=False, transform=valid_transform)
         # Sostituisci la riga del print che ha dato errore con questa:
         #print("Esempio prime 3 label del train:", [train_dataset[i][1] for i in range(3)])
         #print("Esempio prime 3 label del test :", [val_dataset[i][1] for i in range(3)])
