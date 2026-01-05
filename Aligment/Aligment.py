@@ -16,9 +16,9 @@ class AlignerMtcnn:
 
     Mantiene la stessa concettualità del file originale:
     - metodo `get_face_keypoints_mtcnn(image_bgr)` che ritorna (5,2) o None
-    - metodo `align_to_image(img_src, img_dst)` che restituisce `img_src` warpAffine allineata a `img_dst`
 
-    In aggiunta fornisce `align_to_template(img, out_size=(W,H))` e `__call__(img)` utili per inserirla nei `transforms`.
+
+    `align_to_template(img, out_size=(W,H))` e `__call__(img)` utili per inserirla nei `transforms`.
 
     Note:
     - Accetta immagini numpy HxWx3 (RGB o BGR); usa un'euristica interna per passare al detector in formato RGB.
@@ -72,28 +72,6 @@ class AlignerMtcnn:
         M, inliers = cv2.estimateAffinePartial2D(src_pts, dst_pts)
         return M
 
-    def align_to_image(self, img_src: np.ndarray, img_dst: np.ndarray):
-        """Allinea `img_src` su `img_dst` usando i 5 keypoints rilevati su entrambi.
-
-        Restituisce l'immagine allineata in BGR (stessa convenzione di cv2.imread).
-        Se non si trovano keypoints, lancia RuntimeError (come il file originale).
-        """
-        if img_src is None or img_dst is None:
-            raise RuntimeError("img_src o img_dst è None")
-
-        kp_src = self.get_face_keypoints_mtcnn(img_src)
-        kp_dst = self.get_face_keypoints_mtcnn(img_dst)
-
-        if kp_src is None or kp_dst is None:
-            raise RuntimeError("Volto non rilevato in una delle immagini")
-
-        M = self.compute_affine(kp_src, kp_dst)
-        if M is None:
-            raise RuntimeError("Impossibile calcolare la trasformazione affine")
-
-        h_dst, w_dst = img_dst.shape[:2]
-        aligned = cv2.warpAffine(img_src, M, (w_dst, h_dst))
-        return aligned
 
     def _canonical_dst(self, out_size=None):
         W, H = (out_size or self.out_size)
@@ -152,22 +130,17 @@ class AlignerMtcnn:
 if __name__ == "__main__":
     aligner = AlignerMtcnn()
 
-    img_src_path = "Dataset/image0000060.jpg"
-    img_dst_path = "Dataset/image0000416.jpg"
+    img_src_path = "Dataset/image0000416.jpg"
 
     img_src = cv2.imread(img_src_path)
-    img_dst = cv2.imread(img_dst_path)
 
     if img_src is None:
         raise RuntimeError(f"img_src = None (path sbagliato o file non leggibile): {img_src_path}")
-    if img_dst is None:
-        raise RuntimeError(f"img_dst = None (path sbagliato o file non leggibile): {img_dst_path}")
 
-    aligned = aligner.align_to_image(img_src, img_dst)
+    aligned = aligner.align_to_template(img_src, out_size=(224, 224))
 
     cv2.imshow("Original Source", img_src)
     cv2.imshow("Aligned Source", aligned)
-    cv2.imshow("Target", img_dst)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
