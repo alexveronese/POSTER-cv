@@ -89,35 +89,7 @@ def run_training():
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
-    ])
-    
-    if args.alignment.lower() == 'true':
-        try:
-            # import locale per evitare dipendenza se --alignment non è usato
-            from Aligment.Aligment import AlignerMtcnn
-            # istanzia su CPU per sicurezza con num_workers > 0
-            aligner = AlignerMtcnn(device='cpu', out_size=(224, 224))
-        except Exception as e:
-            raise RuntimeError("Allineamento richiesto ma AlignerMtcnn o le sue dipendenze non sono disponibili: " + str(e))
-        print("Allineamento delle immagini abilitato.")
-
-        data_transforms = transforms.Compose([
-            AlignerMtcnn(device='cpu', out_size=(224, 224)),  # Allinea l'immagine
-            transforms.ToPILImage(),
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225])
-        ])
-        data_transforms_val = transforms.Compose([
-            AlignerMtcnn(device='cpu', out_size=(224, 224)),  # Allinea l'immagine
-            transforms.ToPILImage(),
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225])
-        ])
-        
+    ])   
 
     num_classes = 7
     use_lighting = getattr(args, 'lighting', False)
@@ -131,16 +103,13 @@ def run_training():
         # Initialize training and validation datasets
         train_dataset = RafDataSet(datapath, train=True, transform=train_transform, basic_aug=True)
         val_dataset = RafDataSet(datapath, train=False, transform=valid_transform)
-        # Sostituisci la riga del print che ha dato errore con questa:
-        #print("Esempio prime 3 label del train:", [train_dataset[i][1] for i in range(3)])
-        #print("Esempio prime 3 label del test :", [val_dataset[i][1] for i in range(3)])
 
         # Create the model with specified type and input config
         model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
     elif args.dataset == "affectnet":
         datapath = './POSTER/dataset/AffectNetDataSet/'
 
-        train_transform, valid_transform = _data_transforms_affectnet(datapath, use_lighting=use_lighting)
+        train_transform, valid_transform = _data_transforms_affectnet(datapath, use_lighting=use_lighting,alignment=args.alignment.lower()=='true')
 
         # Initialize training and validation datasets
         train_dataset = Affectdataset(datapath, train=True, transform=train_transform, basic_aug=True)
@@ -150,7 +119,32 @@ def run_training():
         model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
     elif args.dataset == "ferplus":
         datapath = './POSTER/dataset/FerPlusDataSet/'
-
+        #se abilitato allineamento 
+        if args.alignment.lower() == 'true':
+            try:
+                # import locale per evitare dipendenza se --alignment non è usato
+                from Aligment.Aligment import AlignerMtcnn
+                # istanzia su CPU per sicurezza con num_workers > 0
+                aligner = AlignerMtcnn(device='cpu', out_size=(224, 224))
+            except Exception as e:
+                raise RuntimeError("Allineamento richiesto ma AlignerMtcnn o le sue dipendenze non sono disponibili: " + str(e))
+            print("Allineamento delle immagini abilitato.")
+            data_transforms = transforms.Compose([
+                AlignerMtcnn(device='cpu', out_size=(224, 224)),  # Allinea l'immagine
+                transforms.ToPILImage(),
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                    std=[0.229, 0.224, 0.225])
+            ])
+            data_transforms_val = transforms.Compose([
+                AlignerMtcnn(device='cpu', out_size=(224, 224)),  # Allinea l'immagine
+                transforms.ToPILImage(),
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                    std=[0.229, 0.224, 0.225])
+            ])
         # Initialize training and validation datasets
         train_dataset = FerPlusDataSet(datapath, train=True, transform=data_transforms, basic_aug=True)
         val_dataset = FerPlusDataSet(datapath, train=False, transform=data_transforms_val)

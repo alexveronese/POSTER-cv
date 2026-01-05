@@ -200,7 +200,16 @@ def _data_transforms_raf(datadir, use_lighting=False):
 
     return train_transform, valid_transform
 
-def _data_transforms_affectnet(datadir, use_lighting=False):
+def _data_transforms_affectnet(datadir, use_lighting=False, alignment=False):
+    try:
+        # import locale per evitare dipendenza se --alignment non è usato
+        from Aligment.Aligment import AlignerMtcnn
+        # istanzia su CPU per sicurezza con num_workers > 0
+        aligner = AlignerMtcnn(device='cpu', out_size=(224, 224))
+    except Exception as e:
+        raise RuntimeError("Allineamento richiesto ma AlignerMtcnn o le sue dipendenze non sono disponibili: " + str(e))
+    print("Allineamento delle immagini abilitato.")
+    
     train_transform_list = [
         transforms.ToPILImage(),
         transforms.Resize((224, 224))
@@ -219,6 +228,7 @@ def _data_transforms_affectnet(datadir, use_lighting=False):
     train_transform = transforms.Compose(train_transform_list)
 
     valid_transform = transforms.Compose([
+        AlignerMtcnn(device='cpu', out_size=(224, 224)),# allineamento
         transforms.ToPILImage(),
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
