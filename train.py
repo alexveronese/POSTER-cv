@@ -113,7 +113,7 @@ def run_training():
 
         # Initialize training and validation datasets
         train_dataset = Affectdataset(datapath, train=True, transform=train_transform, basic_aug=True)
-        val_dataset = Affectdataset(datapath, train=False, transform=data_transforms_val)
+        val_dataset = Affectdataset(datapath, train=False, transform=valid_transform)
 
         # Create the model with specified type and input config
         model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
