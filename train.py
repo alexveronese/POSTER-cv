@@ -112,8 +112,8 @@ def run_training():
         train_transform, valid_transform = _data_transforms_affectnet(datapath, use_lighting=use_lighting,alignment=args.alignment.lower()=='true')
 
         # Initialize training and validation datasets
-        train_dataset = Affectdataset(datapath, train=True, transform=train_transform, basic_aug=True)
-        val_dataset = Affectdataset(datapath, train=False, transform=valid_transform)
+        train_dataset = RafDataSet(datapath, train=True, transform=train_transform, basic_aug=True)
+        val_dataset = RafDataSet(datapath, train=False, transform=valid_transform)
 
         # Create the model with specified type and input config
         model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
@@ -146,8 +146,8 @@ def run_training():
                                     std=[0.229, 0.224, 0.225])
             ])
         # Initialize training and validation datasets
-        train_dataset = FerPlusDataSet(datapath, train=True, transform=data_transforms, basic_aug=True)
-        val_dataset = FerPlusDataSet(datapath, train=False, transform=data_transforms_val)
+        train_dataset = RafDataSet(datapath, train=True, transform=data_transforms, basic_aug=True)
+        val_dataset = RafDataSet(datapath, train=False, transform=data_transforms_val)
 
         # Create the model with specified type and input config
         model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
