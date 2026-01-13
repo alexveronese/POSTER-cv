@@ -201,19 +201,26 @@ def _data_transforms_raf(datadir, use_lighting=False):
     return train_transform, valid_transform
 
 def _data_transforms_affectnet(datadir, use_lighting=False, alignment=False):
-    try:
-        # import locale per evitare dipendenza se --alignment non è usato
-        from Aligment.Aligment import AlignerMtcnn
-        # istanzia su CPU per sicurezza con num_workers > 0
-        aligner = AlignerMtcnn(device='cpu', out_size=(224, 224))
-    except Exception as e:
-        raise RuntimeError("Allineamento richiesto ma AlignerMtcnn o le sue dipendenze non sono disponibili: " + str(e))
-    print("Allineamento delle immagini abilitato.")
-    
-    train_transform_list = [
+    if alignment:
+        try:
+            # import locale per evitare dipendenza se --alignment non è usato
+            from Aligment.Aligment import AlignerMtcnn
+            # istanzia su CPU per sicurezza con num_workers > 0
+            aligner = AlignerMtcnn(device='cpu', out_size=(224, 224))
+        except Exception as e:
+            raise RuntimeError("Allineamento richiesto ma AlignerMtcnn o le sue dipendenze non sono disponibili: " + str(e))
+        print("Allineamento delle immagini abilitato.")
+
+        train_transform_list = [AlignerMtcnn(device='cpu', out_size=(224, 224))]
+        valid_transform_list = [AlignerMtcnn(device='cpu', out_size=(224, 224))]
+    else:
+        train_transform_list = []
+        valid_transform_list = []
+
+    train_transform_list.extend([
         transforms.ToPILImage(),
         transforms.Resize((224, 224))
-    ]
+    ])
 
     if use_lighting:
         train_transform_list.append(Lighting(0.1))  # Lighting augmentation
@@ -227,14 +234,15 @@ def _data_transforms_affectnet(datadir, use_lighting=False, alignment=False):
 
     train_transform = transforms.Compose(train_transform_list)
 
-    valid_transform = transforms.Compose([
-        AlignerMtcnn(device='cpu', out_size=(224, 224)),# allineamento
+    valid_transform_list.extend([
         transforms.ToPILImage(),
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
     ])
+
+    valid_transform = transforms.Compose(valid_transform_list)
 
     return train_transform, valid_transform
 
