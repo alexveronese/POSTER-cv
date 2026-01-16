@@ -119,6 +119,7 @@ def run_training():
         model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
     elif args.dataset == "ferplus":
         datapath = './POSTER/dataset/FerPlusDataSet/'
+        num_classes = 8
         #se abilitato allineamento 
         if args.alignment.lower() == 'true':
             try:
