@@ -109,7 +109,7 @@ def run_training():
         model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
     elif args.dataset == "affectnet":
         datapath = './POSTER/dataset/AffectNetDataSet/'
-
+        num_classes = 8
         train_transform, valid_transform = _data_transforms_affectnet(datapath, use_lighting=use_lighting,alignment=args.alignment)
 
         # Initialize training and validation datasets
