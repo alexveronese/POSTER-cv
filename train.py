@@ -128,6 +128,17 @@ def run_training():
 
         # Create the model with specified type and input config
         model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
+    elif args.dataset == "ferplus":
+        datapath = './POSTER/dataset/FerPlusDataSet/'
+        num_classes = 8
+        train_transform, valid_transform = _data_transforms_fer2013(datapath, use_lighting=use_lighting, alignment=args.alignment)
+
+        # Initialize training and validation datasets
+        train_dataset = DataSetLoader(datapath, train=True, transform=train_transform, basic_aug=True)
+        val_dataset = DataSetLoader(datapath, train=False, transform=valid_transform)
+
+        # Create the model with specified type and input config
+        model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
     elif args.dataset == "ck+":
         datapath = './POSTER/dataset/CK+DataSet/ckextended.csv'
         num_classes = 8
