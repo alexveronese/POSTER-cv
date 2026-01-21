@@ -7,7 +7,7 @@ import torch.utils.data as data
 import torchvision.transforms as transforms
 
 from data_preprocessing.dataset_ferplus import FerPlusDataSet
-from data_preprocessing.dataset_raf import RafDataSet
+from data_preprocessing.dataset_raf import DataSetLoader
 from data_preprocessing.dataset_affectnet import Affectdataset
 from data_preprocessing.dataset_ckplus import CKplusDataSet
 
@@ -211,16 +211,13 @@ def _data_transforms_affectnet(datadir, use_lighting=False, alignment=False):
             raise RuntimeError("Allineamento richiesto ma AlignerMtcnn o le sue dipendenze non sono disponibili: " + str(e))
         print("Allineamento delle immagini abilitato.")
 
-        train_transform_list = [AlignerMtcnn(device='cpu', out_size=(224, 224))]
-        valid_transform_list = [AlignerMtcnn(device='cpu', out_size=(224, 224))]
+        train_transform_list = [aligner]
+        valid_transform_list = [aligner]
     else:
-        train_transform_list = []
-        valid_transform_list = []
-
-    train_transform_list.extend([
-        transforms.ToPILImage(),
-        transforms.Resize((224, 224))
-    ])
+        train_transform_list = [transforms.ToPILImage(),
+                                transforms.Resize((224, 224))]
+        valid_transform_list = [transforms.ToPILImage(),
+                                transforms.Resize((224, 224))]
 
     if use_lighting:
         train_transform_list.append(Lighting(0.1))  # Lighting augmentation
@@ -235,8 +232,46 @@ def _data_transforms_affectnet(datadir, use_lighting=False, alignment=False):
     train_transform = transforms.Compose(train_transform_list)
 
     valid_transform_list.extend([
-        transforms.ToPILImage(),
-        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+
+    valid_transform = transforms.Compose(valid_transform_list)
+
+    return train_transform, valid_transform
+
+def _data_transforms_fer2013(datadir, use_lighting=False, alignment=False):
+    if alignment:
+        try:
+            from Aligment.Aligment import AlignerMtcnn
+            # istanzia su CPU per sicurezza con num_workers > 0
+            aligner = AlignerMtcnn(device='cpu', out_size=(224, 224))
+        except Exception as e:
+            raise RuntimeError("Allineamento richiesto ma AlignerMtcnn o le sue dipendenze non sono disponibili: " + str(e))
+        print("Allineamento delle immagini abilitato.")
+
+        train_transform_list = [aligner]
+        valid_transform_list = [aligner]
+    else:
+        train_transform_list = [transforms.ToPILImage(),
+                                transforms.Resize((224, 224))]
+        valid_transform_list = [transforms.ToPILImage(),
+                                transforms.Resize((224, 224))]
+
+    if use_lighting:
+        train_transform_list.append(Lighting(0.1))  # Lighting augmentation
+
+    train_transform_list.extend([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225]),
+        transforms.RandomErasing(scale=(0.02, 0.1))
+    ])
+
+    train_transform = transforms.Compose(train_transform_list)
+
+    valid_transform_list.extend([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
@@ -285,7 +320,7 @@ def load_data(datadir):
     """
     if "raf" in datadir:
         train_transform, test_transform = _data_transforms_raf(datadir)
-        dl_obj = RafDataSet
+        dl_obj = DataSetLoader
         train_ds = dl_obj(datadir, train=True, transform=train_transform, basic_aug=True)
         test_ds = dl_obj(datadir, train=False, transform=test_transform)
         y_train, y_test = train_ds.target, test_ds.target  # Assumes .target attributes contain labels
@@ -389,7 +424,7 @@ def get_dataloader(datadir, train_bs, test_bs, balanced_sampler, dataidxs=None):
 
     if 'raf' in datadir:
         train_transform, test_transform = _data_transforms_raf(datadir)
-        dl_obj = RafDataSet
+        dl_obj = DataSetLoader
         workers = 4
         persist = False
 

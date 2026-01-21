@@ -14,7 +14,7 @@ import argparse
 from collections import Counter
 
 # Import the custom dataset class
-from data_preprocessing.dataset_raf import RafDataSet
+from data_preprocessing.dataset_raf import DataSetLoader
 from data_preprocessing.dataset_affectnet import Affectdataset
 from data_preprocessing.dataset_ferplus import FerPlusDataSet
 from data_preprocessing.dataset_ckplus import CKplusDataSet
@@ -35,6 +35,7 @@ from data_preprocessing.data_loader import ImbalancedDatasetSampler
 from data_preprocessing.data_loader import _data_transforms_raf
 from data_preprocessing.data_loader import _data_transforms_affectnet
 from data_preprocessing.data_loader import _data_transforms_ckplus
+from data_preprocessing.data_loader import _data_transforms_fer2013
 
 
 def parse_args():
@@ -43,7 +44,7 @@ def parse_args():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='rafdb', help='dataset name')
-    parser.add_argument('--alignment', type=str, default='false', help='true or false, whether to use aligned images')
+    parser.add_argument('--alignment', action='store_true', help='true or false, whether to use aligned images')
     parser.add_argument('-c', '--checkpoint', type=str, default=None, help='Path to PyTorch checkpoint file')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
     parser.add_argument('--val_batch_size', type=int, default=32, help='Batch size for validation')
@@ -101,54 +102,29 @@ def run_training():
         train_transform, valid_transform = _data_transforms_raf(datapath, use_lighting=use_lighting)
 
         # Initialize training and validation datasets
-        train_dataset = RafDataSet(datapath, train=True, transform=train_transform, basic_aug=True)
-        val_dataset = RafDataSet(datapath, train=False, transform=valid_transform)
+        train_dataset = DataSetLoader(datapath, train=True, transform=train_transform, basic_aug=True)
+        val_dataset = DataSetLoader(datapath, train=False, transform=valid_transform)
 
         # Create the model with specified type and input config
         model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
     elif args.dataset == "affectnet":
         datapath = './POSTER/dataset/AffectNetDataSet/'
 
-        train_transform, valid_transform = _data_transforms_affectnet(datapath, use_lighting=use_lighting,alignment=args.alignment.lower()=='true')
+        train_transform, valid_transform = _data_transforms_affectnet(datapath, use_lighting=use_lighting,alignment=args.alignment)
 
         # Initialize training and validation datasets
-        train_dataset = RafDataSet(datapath, train=True, transform=train_transform, basic_aug=True)
-        val_dataset = RafDataSet(datapath, train=False, transform=valid_transform)
+        train_dataset = DataSetLoader(datapath, train=True, transform=train_transform, basic_aug=True)
+        val_dataset = DataSetLoader(datapath, train=False, transform=valid_transform)
 
         # Create the model with specified type and input config
         model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)
-    elif args.dataset == "ferplus":
-        datapath = './POSTER/dataset/FerPlusDataSet/'
-        num_classes = 8
-        #se abilitato allineamento 
-        if args.alignment.lower() == 'true':
-            try:
-                # import locale per evitare dipendenza se --alignment non è usato
-                from Aligment.Aligment import AlignerMtcnn
-                # istanzia su CPU per sicurezza con num_workers > 0
-                aligner = AlignerMtcnn(device='cpu', out_size=(224, 224))
-            except Exception as e:
-                raise RuntimeError("Allineamento richiesto ma AlignerMtcnn o le sue dipendenze non sono disponibili: " + str(e))
-            print("Allineamento delle immagini abilitato.")
-            data_transforms = transforms.Compose([
-                AlignerMtcnn(device='cpu', out_size=(224, 224)),  # Allinea l'immagine
-                transforms.ToPILImage(),
-                transforms.Resize((224, 224)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                    std=[0.229, 0.224, 0.225])
-            ])
-            data_transforms_val = transforms.Compose([
-                AlignerMtcnn(device='cpu', out_size=(224, 224)),  # Allinea l'immagine
-                transforms.ToPILImage(),
-                transforms.Resize((224, 224)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                    std=[0.229, 0.224, 0.225])
-            ])
+    elif args.dataset == "fer2013":
+        datapath = './POSTER/dataset/Fer2013DataSet/'
+        train_transform, valid_transform = _data_transforms_fer2013(datapath, use_lighting=use_lighting, alignment=args.alignment)
+
         # Initialize training and validation datasets
-        train_dataset = RafDataSet(datapath, train=True, transform=data_transforms, basic_aug=True)
-        val_dataset = RafDataSet(datapath, train=False, transform=data_transforms_val)
+        train_dataset = DataSetLoader(datapath, train=True, transform=train_transform, basic_aug=True)
+        val_dataset = DataSetLoader(datapath, train=False, transform=valid_transform)
 
         # Create the model with specified type and input config
         model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype, use_lora=args.lora)

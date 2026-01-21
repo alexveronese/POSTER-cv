@@ -5,8 +5,9 @@ import os
 import random
 import numpy as np
 
-class RafDataSet(data.Dataset):
-    # Mapping from folder names (1-7) to emotion labels as strings
+class DataSetLoader(data.Dataset):
+    # Mapping from folder names (1-7/8) to emotion labels as strings
+    # The directories must be named as
     ID_TO_EMOTION = {
         1: "Surprise",
         2: "Fear",
@@ -14,7 +15,8 @@ class RafDataSet(data.Dataset):
         4: "Happy",
         5: "Sad",
         6: "Angry",
-        7: "Neutral"
+        7: "Neutral",
+        8: "Contempt"
     }
 
     def __init__(self, datadir, train=True, transform=None, basic_aug=False, dataidxs=None):
@@ -90,7 +92,10 @@ class RafDataSet(data.Dataset):
         # Load image and corresponding label at index 'idx'
         path = self.file_paths[idx]
         img = cv2.imread(path)
-        img = img[:, :, ::-1]  # Convert BGR (OpenCV format) to RGB
+        if len(img.shape) == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+        else:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # Convert BGR (OpenCV format) to RGB
 
         target = self.target[idx]
 
