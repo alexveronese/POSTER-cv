@@ -15,8 +15,9 @@ from models.emotion_hyp import pyramid_trans_expr
 from sklearn.metrics import confusion_matrix
 from data_preprocessing.plot_confusion_matrix import plot_confusion_matrix
 from Aligment.Aligment import AlignerMtcnn
-#from moviepy.editor import VideoFileClip, ImageSequenceClip
+from moviepy.editor import VideoFileClip, ImageSequenceClip
 from tqdm.notebook import tqdm
+from facenet_pytorch import (MTCNN)
 from PIL import Image
 import cv2
 
@@ -43,6 +44,18 @@ def test():
 
     aligner = AlignerMtcnn(device='cpu', out_size=(224, 224))
 
+    # Initialize MTCNN model for single face cropping
+    mtcnn = MTCNN(
+        image_size=224,
+        margin=0,
+        min_face_size=200,
+        thresholds=[0.6, 0.7, 0.7],
+        factor=0.709,
+        post_process=False,
+        keep_all=False,
+        device=device
+    )
+
     data_transforms_test = transforms.Compose([
         aligner,
         transforms.ToPILImage(),
@@ -61,27 +74,38 @@ def test():
         6: "Neutral",
     }
 
-    """
+
     # Load your video
-    scene = 'White Chicks - short.mp4'
+    scene = "C:\\Users\\veron\\Downloads\\lalaland.mov"
     clip = VideoFileClip(scene)
     # Save video frames per second
     vid_fps = clip.fps
     # Get the video (as frames)
     video = clip.without_audio()
     video_data = np.array(list(video.iter_frames()))
+    #print(vid_fps)
 
-    skips = 2
+    skips = 120
     reduced_video = []
 
+
     for i in tqdm(range(0, len(video_data), skips)):
-        reduced_video.append(video_data[i])
+        temporary = Image.fromarray(video_data[i]).copy()
+        sample = mtcnn.detect(temporary)
+        if sample[0] is not None:
+            box = sample[0][0]
+            face = temporary.crop(box)
+            reduced_video.append(face)
+
+    #reduced_video[0].show()
+    print(len(reduced_video))
     """
     path = "C:\\Users\\veron\\Downloads\\affectnet\\archive(3)\\Test\\happy\\ffhq_863.png"
     img = cv2.imread(path)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     test_dataset = data_transforms_test(img).unsqueeze(0).to(device)
-    #test_dataset = [data_transforms_test(x) for x in reduced_video]
+    """
+
     model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype)
 
     print("Loading pretrained weights...", args.checkpoint)
@@ -89,18 +113,25 @@ def test():
     checkpoint = checkpoint["model_state_dict"]
     model = load_pretrained_weights(model, checkpoint)
 
-    test_size = test_dataset.__len__()
-    print('Test set size:', test_size)
+    for img in reduced_video:
+        test_dataset = data_transforms_test(img).unsqueeze(0).to(device)
+        test_size = test_dataset.__len__()
+        print('Test set size:', test_size)
 
-    model = model.to(device)
+        model = model.to(device)
 
-    model.eval()
-    with torch.no_grad():
-        labels, features = model(test_dataset)
-        _, predicts = torch.max(labels, 1)
+        model.eval()
+        with torch.no_grad():
+            labels, features = model(test_dataset)
+            _, predicts = torch.max(labels, 1)
 
-    print(labels)
-    print(ID_TO_EMOTION[predicts.numpy()[0]])
+        print(labels)
+        opencvImage = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        cv2.imshow(str(ID_TO_EMOTION[predicts.numpy()[0]]), opencvImage)
+        print(ID_TO_EMOTION[predicts.numpy()[0]])
+
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
     """
     pre_labels = []
     gt_labels = []
