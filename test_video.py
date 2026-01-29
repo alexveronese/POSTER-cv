@@ -1,3 +1,4 @@
+from turtle import mode
 import warnings
 warnings.filterwarnings("ignore")
 import numpy as np
@@ -15,9 +16,9 @@ from models.emotion_hyp import pyramid_trans_expr
 from sklearn.metrics import confusion_matrix
 from data_preprocessing.plot_confusion_matrix import plot_confusion_matrix
 from Aligment.Aligment import AlignerMtcnn
-from moviepy.editor import VideoFileClip, ImageSequenceClip
-from tqdm.notebook import tqdm
-from facenet_pytorch import (MTCNN)
+#from moviepy.editor import VideoFileClip, ImageSequenceClip
+#from tqdm.notebook import tqdm
+#from facenet_pytorch import (MTCNN)
 from PIL import Image
 import cv2
 
@@ -39,12 +40,13 @@ def test():
     args = parse_args()
     #os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     #print("Work on GPU: ", os.environ['CUDA_VISIBLE_DEVICES'])
-    device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
+    device = torch.device("cuda" if torch.cuda.is_available() else ("cpu"))
     print("Using device:", device)
 
     aligner = AlignerMtcnn(device='cpu', out_size=(224, 224))
 
     # Initialize MTCNN model for single face cropping
+    """
     mtcnn = MTCNN(
         image_size=224,
         margin=0,
@@ -55,7 +57,7 @@ def test():
         keep_all=False,
         device=device
     )
-
+"""
     data_transforms_test = transforms.Compose([
         aligner,
         transforms.ToPILImage(),
@@ -73,18 +75,74 @@ def test():
         5: "Angry",
         6: "Neutral",
     }
+    
+    model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype)
 
-
+    print("Loading pretrained weights...", args.checkpoint)
+    checkpoint = torch.load(args.checkpoint, map_location='cpu')
+    checkpoint = checkpoint["model_state_dict"]
+    model = load_pretrained_weights(model, checkpoint)
     # Load your video
-    scene = "C:\\Users\\veron\\Downloads\\lalaland.mov"
-    clip = VideoFileClip(scene)
+    scene = "Video20sec.mov"
+    
+    """
+    clip = VideoFileClip(scene) Videoclip è più lento e per montaggio video
     # Save video frames per second
     vid_fps = clip.fps
-    # Get the video (as frames)
     video = clip.without_audio()
     video_data = np.array(list(video.iter_frames()))
+    cv2_video = cv2.VideoCapture(scene)
+    # Get the video (as frames)
     #print(vid_fps)
+    """
+    
+    cv2_video = cv2.VideoCapture(scene)
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    
+    model.eval()
+    i = 0
+    status = ""
+    while cv2_video.isOpened():
+        ret, frame = cv2_video.read()
+        
+        if not ret:
+            break
+        
+        #if (i == 0 or i == 30):
+        i = 1
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        
+        if len(faces) == 0: 
+            continue
+        
+        x, y, w, h = faces[0]
+        face_img = frame[y:y+h, x:x+w]
+        face_img = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
+        
+    
+        test_dataset = data_transforms_test(face_img).unsqueeze(0).to(device)
+        with torch.no_grad():
+            labels, features = model(test_dataset)
+            _, predicts = torch.max(labels, 1)
+            cv2.putText(frame, ID_TO_EMOTION[predicts.numpy()[0]], (x, y-10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
+            status = ID_TO_EMOTION[predicts.numpy()[0]]
+            
+        #i += 1
+        
+        cv2.rectangle(frame, (x,y), (x+w, y+h), (0,255,0), 2)
 
+        cv2.imshow("Emotion video", frame)
+
+        if cv2.waitKey(25) & 0xFF == ord('q'):
+            break
+
+    cv2_video.release()
+
+
+
+    """
     skips = 120
     reduced_video = []
 
@@ -100,18 +158,14 @@ def test():
     #reduced_video[0].show()
     print(len(reduced_video))
     """
+    """
     path = "C:\\Users\\veron\\Downloads\\affectnet\\archive(3)\\Test\\happy\\ffhq_863.png"
     img = cv2.imread(path)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     test_dataset = data_transforms_test(img).unsqueeze(0).to(device)
-    """
+    
 
-    model = pyramid_trans_expr(img_size=224, num_classes=num_classes, type=args.modeltype)
 
-    print("Loading pretrained weights...", args.checkpoint)
-    checkpoint = torch.load(args.checkpoint, map_location='cpu')
-    checkpoint = checkpoint["model_state_dict"]
-    model = load_pretrained_weights(model, checkpoint)
 
     for img in reduced_video:
         test_dataset = data_transforms_test(img).unsqueeze(0).to(device)
@@ -129,9 +183,10 @@ def test():
         opencvImage = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
         cv2.imshow(str(ID_TO_EMOTION[predicts.numpy()[0]]), opencvImage)
         print(ID_TO_EMOTION[predicts.numpy()[0]])
-
+    """
     cv2.waitKey(0)
     cv2.destroyAllWindows()
+    
     """
     pre_labels = []
     gt_labels = []
