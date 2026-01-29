@@ -84,7 +84,7 @@ def test():
     checkpoint = checkpoint["model_state_dict"]
     model = load_pretrained_weights(model, checkpoint)
     # Load your video
-    scene = "Video20sec.mov"
+    scene = "C:\\Users\\veron\\Downloads\\lalaland.mov"
     
     """
     clip = VideoFileClip(scene) Videoclip è più lento e per montaggio video
@@ -114,7 +114,9 @@ def test():
     plt.ion()  # modalità interattiva
     fig, axs = plt.subplots(1, 1, figsize=(4, 2))
     window_name = "Emotion video"
-    
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window_name, 1920, 1080)
+
     manager = plt.get_current_fig_manager()
     try:
         # Backend tipico (Qt5Agg)
@@ -150,6 +152,9 @@ def test():
             labels, features = model(test_dataset)
             _, predicts = torch.max(labels, 1)
             
+            #if(ID_TO_EMOTION[predicts.numpy()[0]] == "Surprise"):
+            #    cv2.imwrite("saved_surprise.jpg", frame)
+
             probabilities = torch.nn.functional.softmax(labels, dim=-1)
             probabilities = probabilities.detach().numpy().tolist()[0]
             class_probabilities = {ID_TO_EMOTION[i] : prob for i,
@@ -163,8 +168,9 @@ def test():
                     orient='h')
             axs.set_xlabel('Probability (%)')
             axs.set_title('Emotion Probabilities')
-            axs.set_xlim([0, 100]) 
+            axs.set_xlim([0, 100])
 
+            plt.tight_layout()
             plt.draw()
             plt.pause(0.1) 
             cv2.putText(frame, ID_TO_EMOTION[predicts.numpy()[0]], (x, y-10),
@@ -176,7 +182,7 @@ def test():
         cv2.rectangle(frame, (x,y), (x+w, y+h), (0,255,0), 2)
 
         cv2.imshow(window_name, frame)
-
+        cv2.moveWindow(window_name, 0, 0, )
         if cv2.waitKey(25) & 0xFF == ord('q'):
             break
 
