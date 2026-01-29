@@ -10,7 +10,7 @@ import argparse
 from data_preprocessing.dataset_raf import DataSetLoader
 from data_preprocessing.dataset_affectnet import Affectdataset
 from data_preprocessing.dataset_affectnet_8class import Affectdataset_8class
-
+import matplotlib.pyplot as plt
 from utils import *
 from models.emotion_hyp import pyramid_trans_expr
 from sklearn.metrics import confusion_matrix
@@ -21,6 +21,7 @@ from Aligment.Aligment import AlignerMtcnn
 #from facenet_pytorch import (MTCNN)
 from PIL import Image
 import cv2
+import seaborn as sns
 
 
 
@@ -98,10 +99,33 @@ def test():
     
     cv2_video = cv2.VideoCapture(scene)
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    
+    colors = {
+            "Angry": "red",
+            "Disgust": "green",
+            "Fear": "gray",
+            "Happy": "yellow",
+            "Neutral": "purple",
+            "Sad": "blue",
+            "Surprise": "orange"
+        }
     model.eval()
     i = 0
     status = ""
+    plt.ion()  # modalità interattiva
+    fig, axs = plt.subplots(1, 1, figsize=(4, 2))
+    window_name = "Emotion video"
+    
+    manager = plt.get_current_fig_manager()
+    try:
+        # Backend tipico (Qt5Agg)
+        manager.window.move(0, 800)   # (x=0, y=800) -> con y verso il basso
+    except Exception:
+        try:
+            # Backend TkAgg
+            manager.window.wm_geometry("+0+800")
+        except Exception:
+            pass
+    
     while cv2_video.isOpened():
         ret, frame = cv2_video.read()
         
@@ -125,6 +149,24 @@ def test():
         with torch.no_grad():
             labels, features = model(test_dataset)
             _, predicts = torch.max(labels, 1)
+            
+            probabilities = torch.nn.functional.softmax(labels, dim=-1)
+            probabilities = probabilities.detach().numpy().tolist()[0]
+            class_probabilities = {ID_TO_EMOTION[i] : prob for i,
+                               prob in enumerate(probabilities)}
+            palette = [colors[label] for label in class_probabilities.keys()]
+            axs.clear()
+            sns.barplot(ax=axs,
+                    y=list(class_probabilities.keys()),
+                    x=[prob * 100 for prob in class_probabilities.values()],
+                    palette=palette,
+                    orient='h')
+            axs.set_xlabel('Probability (%)')
+            axs.set_title('Emotion Probabilities')
+            axs.set_xlim([0, 100]) 
+
+            plt.draw()
+            plt.pause(0.1) 
             cv2.putText(frame, ID_TO_EMOTION[predicts.numpy()[0]], (x, y-10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
             status = ID_TO_EMOTION[predicts.numpy()[0]]
@@ -133,7 +175,7 @@ def test():
         
         cv2.rectangle(frame, (x,y), (x+w, y+h), (0,255,0), 2)
 
-        cv2.imshow("Emotion video", frame)
+        cv2.imshow(window_name, frame)
 
         if cv2.waitKey(25) & 0xFF == ord('q'):
             break
