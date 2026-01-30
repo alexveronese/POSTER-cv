@@ -578,7 +578,9 @@ class GradCAM:
             target_class = output.argmax(dim=1).item()
 
         # Backward pass per la classe target
-        one_hot = torch.zeros_like(output).scatter_(1, torch.tensor([target_class]).to(output.device), 1.0)
+        index = torch.tensor([target_class]).to(output.device).view(-1, 1)
+        one_hot = torch.zeros_like(output).scatter_(1, index, 1.0)
+        #one_hot = torch.zeros_like(output).scatter_(1, torch.tensor([target_class]).to(output.device), 1.0)
         output.backward(gradient=one_hot, retain_graph=False)  # retain_graph=False per liberare memoria
 
         # Calcola i pesi (Global Average Pooling dei gradienti)

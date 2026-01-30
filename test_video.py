@@ -41,7 +41,7 @@ def test():
     args = parse_args()
     #os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     #print("Work on GPU: ", os.environ['CUDA_VISIBLE_DEVICES'])
-    device = torch.device("cuda" if torch.cuda.is_available() else ("cpu"))
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
 
     aligner = AlignerMtcnn(device='cpu', out_size=(224, 224))
@@ -143,20 +143,22 @@ def test():
             continue
         
         x, y, w, h = faces[0]
-        face_img = frame[y:y+h, x:x+w]
-        face_img = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
+        face_img_orig = frame[y:y+h, x:x+w]
+        face_img = cv2.cvtColor(face_img_orig, cv2.COLOR_BGR2RGB)
         
     
         test_dataset = data_transforms_test(face_img).unsqueeze(0).to(device)
         with torch.no_grad():
             labels, features = model(test_dataset)
             _, predicts = torch.max(labels, 1)
-            
-            #if(ID_TO_EMOTION[predicts.numpy()[0]] == "Surprise"):
-            #    cv2.imwrite("saved_surprise.jpg", frame)
 
             probabilities = torch.nn.functional.softmax(labels, dim=-1)
             probabilities = probabilities.detach().numpy().tolist()[0]
+
+            #if probabilities[4] >= 0.87:
+            #    print(str(ID_TO_EMOTION[predicts.numpy()[0]]) + " salva immagine")
+            #    cv2.imwrite("saved_sad_top.jpg", face_img_orig)
+
             class_probabilities = {ID_TO_EMOTION[i] : prob for i,
                                prob in enumerate(probabilities)}
             palette = [colors[label] for label in class_probabilities.keys()]
