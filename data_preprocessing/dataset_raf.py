@@ -110,7 +110,7 @@ class DataSetLoader(data.Dataset):
             img = self.transform(img)
 
         # Return augmented/transformed image and label tuple
-        return img, target  # optionally can return idx as well
+        return img, target, path  # optionally can return idx as well
 
 
 def add_gaussian_noise(image_array, mean=0.0, var=30):
