@@ -15,8 +15,6 @@ from collections import Counter
 
 # Import the custom dataset class
 from data_preprocessing.dataset_raf import DataSetLoader
-from data_preprocessing.dataset_affectnet import Affectdataset
-from data_preprocessing.dataset_ferplus import FerPlusDataSet
 from data_preprocessing.dataset_ckplus import CKplusDataSet
 
 # Import performance metrics from sklearn
@@ -168,7 +166,8 @@ def run_training():
     labels = train_dataset.target if hasattr(train_dataset, 'target') else [label for _, label in train_dataset]
     label_counts = Counter(labels)
     samples_per_cls = [label_counts[i] if i in label_counts else 0 for i in range(num_classes)]
-    print(f"Samples per class for CB loss: {samples_per_cls}")
+    if args.loss == 'CB_loss':
+        print(f"Samples per class for CB loss: {samples_per_cls}")
 
 
     if args.sampler == 'balanced':
@@ -202,10 +201,10 @@ def run_training():
     #model = torch.nn.DataParallel(model)
     # Attiva DataParallel solo se SLURM ti ha dato più di 1 GPU
     if torch.cuda.is_available() and torch.cuda.device_count() > 1:
-        print(f"Rilevate {torch.cuda.device_count()} GPU. Attivo DataParallel.")
+        print(f"Working on {torch.cuda.device_count()} GPU. DataParallel enabled.")
         model = torch.nn.DataParallel(model)
     else:
-        print("Utilizzo singola GPU/CPU (DataParallel disattivato).")
+        print("Working on single GPU/CPU (DataParallel disabled).")
 
     model = model.to(device)
 
@@ -353,12 +352,8 @@ def run_training():
 
             # Save checkpoint if validation accuracy improves beyond threshold
             if val_acc > 0.907 and val_acc > best_acc:
-                # 1. Ottieni il modello base (gestione DataParallel)
                 model_to_save = model.module if isinstance(model, torch.nn.DataParallel) else model
 
-                # 2. Prepara lo stato da salvare
-                # Se pyramid_fuse è un PeftModel, usiamo il suo metodo interno
-                # Altrimenti salviamo tutto lo state_dict pulito
                 if args.lora:
                     full_dict = model_to_save.state_dict()
                     state_to_save = {
@@ -370,7 +365,6 @@ def run_training():
                     state_to_save = model_to_save.state_dict()
                     print("Saving Full Model...")
 
-                # 3. Salvataggio effettivo
                 torch.save({
                     'iter': i,
                     'model_state_dict': state_to_save,
