@@ -10,19 +10,16 @@ import os
 
 
 def test_inference():
-    # --- CONFIGURAZIONE ---
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model_path = './POSTER/checkpoint/epoch262_acc0.9179.pth'
     index_path = "raf_db_memory.index"
     paths_path = "raf_db_memory_paths.npy"
     labels_path = "raf_db_memory_labels.npy"
 
-    # Mapping delle emozioni per RAF-DB
     emotion_dict = {0: "Surprise", 1: "Fear", 2: "Disgust", 3: "Happy",
                     4: "Sad", 5: "Angry", 6: "Neutral"}
 
-    # 1. CARICAMENTO MODELLO E INDICE
-    print("⏳ Caricamento risorse...")
+    print("Loading resources ...")
     model = pyramid_trans_expr(img_size=224, num_classes=7)
     checkpoint = torch.load(model_path, map_location=device)
 
@@ -32,7 +29,6 @@ def test_inference():
     model.eval()
 
     index = faiss.read_index(index_path)
-    # Se hai una GPU, puoi spostare l'indice qui per ricerche fulminee
     if torch.cuda.is_available():
         res = faiss.StandardGpuResources()
         index = faiss.index_cpu_to_gpu(res, 0, index)
@@ -40,8 +36,6 @@ def test_inference():
     db_paths = np.load(paths_path)
     db_labels = np.load(labels_path)
 
-    # 2. PREPARAZIONE IMMAGINE DI TEST (QUERY)
-    # Scegli un'immagine dal tuo test set
     query_img_path = "./POSTER/saved_very_sad.jpg"
 
     transform = transforms.Compose([
@@ -55,28 +49,23 @@ def test_inference():
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     img_tensor = transform(img_rgb).unsqueeze(0).to(device)
 
-    # 3. ESTRAZIONE E RETRIEVAL
     with torch.no_grad():
         logits, y_feat = model(img_tensor)
         query_feat = y_feat.cpu().numpy().astype('float32')
-        faiss.normalize_L2(query_feat)  # Fondamentale!
+        faiss.normalize_L2(query_feat)
 
-        # Cerchiamo i 5 vicini più simili
         k = 5
         distances, indices = index.search(query_feat, k)
 
-    # 4. VISUALIZZAZIONE
-    print(f"Ricerca completata. Visualizzazione in corso...")
+    print(f"Search done. Creating plot ...")
     plt.figure(figsize=(20, 5))
 
-    # Mostra la Query
     plt.subplot(1, k + 1, 1)
     plt.imshow(img_rgb)
     pred_label = torch.argmax(logits, dim=1).item()
-    plt.title(f"QUERY (Input)\nPred: {emotion_dict[pred_label]}")
+    plt.title(f"Input query\nPrediction: {emotion_dict[pred_label]}")
     plt.axis('off')
 
-    # Mostra i Vicini
     for i in range(k):
         idx = indices[0][i]
         neighbor_img = cv2.cvtColor(cv2.imread(db_paths[idx]), cv2.COLOR_BGR2RGB)
@@ -85,16 +74,15 @@ def test_inference():
 
         plt.subplot(1, k + 1, i + 2)
         plt.imshow(neighbor_img)
-        plt.title(f"Vicino {i + 1}\nLabel: {emotion_dict[label_id]}\nSim: {dist:.3f}")
+        plt.title(f"Neighbour {i + 1}\nLabel: {emotion_dict[label_id]}\nSim: {dist:.3f}")
         plt.axis('off')
 
-    output_dir = "risultati_retrieval"
+    output_dir = "retrieval_results"
     os.makedirs(output_dir, exist_ok=True)
 
-    # Salva il grafico completo
-    save_path = os.path.join(output_dir, "confronto_completo.png")
+    save_path = os.path.join(output_dir, "neighbourhood.png")
     plt.savefig(save_path, bbox_inches='tight', dpi=300)
-    print(f"✅ Grafico salvato in: {save_path}")
+    print(f"Plot saved at: {save_path}")
     # ========================================================
 
     plt.tight_layout()
