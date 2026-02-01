@@ -84,10 +84,10 @@ def test():
     checkpoint = checkpoint["model_state_dict"]
     model = load_pretrained_weights(model, checkpoint)
     # Load your video
-    scene = "C:\\Users\\veron\\Downloads\\lalaland.mov"
+    scene = "/Users/Bea_1/Desktop/lalaland_cut.mov"
     
     """
-    clip = VideoFileClip(scene) Videoclip è più lento e per montaggio video
+    clip = VideoFileClip(scene) 
     # Save video frames per second
     vid_fps = clip.fps
     video = clip.without_audio()
@@ -111,7 +111,7 @@ def test():
     model.eval()
     i = 0
     status = ""
-    plt.ion()  # modalità interattiva
+    plt.ion()  # interacting modality
     fig, axs = plt.subplots(1, 1, figsize=(4, 2))
     window_name = "Emotion video"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
@@ -119,8 +119,8 @@ def test():
 
     manager = plt.get_current_fig_manager()
     try:
-        # Backend tipico (Qt5Agg)
-        manager.window.move(0, 800)   # (x=0, y=800) -> con y verso il basso
+        # Typic backend  (Qt5Agg)
+        manager.window.move(0, 800)   # (x=0, y=800)
     except Exception:
         try:
             # Backend TkAgg
@@ -155,9 +155,9 @@ def test():
             probabilities = torch.nn.functional.softmax(labels, dim=-1)
             probabilities = probabilities.detach().numpy().tolist()[0]
 
-            #if probabilities[4] >= 0.87:
-            #    print(str(ID_TO_EMOTION[predicts.numpy()[0]]) + " salva immagine")
-            #    cv2.imwrite("saved_sad_top.jpg", face_img_orig)
+            if probabilities[3] >=0.5:
+                print(str(ID_TO_EMOTION[predicts.numpy()[0]]) + "save image")
+                cv2.imwrite("saved_happy1.jpg", face_img_orig)
 
             class_probabilities = {ID_TO_EMOTION[i] : prob for i,
                                prob in enumerate(probabilities)}
