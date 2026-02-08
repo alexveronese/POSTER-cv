@@ -2,15 +2,15 @@
 import cv2
 import numpy as np
 
-img_path = "Dataset/image0000416.jpg"         # cambia qui
-ref_path = "test_0015_aligned.jpg"          # cambia qui
+img_path = "Dataset/image0000416.jpg"
+ref_path = "test_0015_aligned.jpg"
 
 img = cv2.imread(img_path)
 ref = cv2.imread(ref_path)
 ref_gray = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY)
 img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-orb = cv2.ORB_create(nfeatures=5000)  # aumenta per trovare più keypoints
+orb = cv2.ORB_create(nfeatures=5000)
 kp1, des1 = orb.detectAndCompute(ref_gray, None)
 kp2, des2 = orb.detectAndCompute(img_gray, None)
 print("Keypoints ref:", len(kp1), "Keypoints img:", len(kp2))
@@ -26,7 +26,7 @@ for m_n in knn:
     if len(m_n) != 2:
         continue
     m, n = m_n
-    if m.distance < 0.85 * n.distance:  # puoi provare 0.75 -> 0.9
+    if m.distance < 0.85 * n.distance:
         good.append(m)
 print("Good matches:", len(good))
 

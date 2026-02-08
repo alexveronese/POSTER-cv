@@ -203,9 +203,9 @@ def _data_transforms_raf(datadir, use_lighting=False):
 def _data_transforms_affectnet(datadir, use_lighting=False, alignment=False):
     if alignment:
         try:
-            # import locale per evitare dipendenza se --alignment non è usato
+
             from Aligment.Aligment import AlignerMtcnn
-            # istanzia su CPU per sicurezza con num_workers > 0
+
             aligner = AlignerMtcnn(device='cpu', out_size=(224, 224))
         except Exception as e:
             raise RuntimeError("Allineamento richiesto ma AlignerMtcnn o le sue dipendenze non sono disponibili: " + str(e))
@@ -245,7 +245,7 @@ def _data_transforms_fer2013(datadir, use_lighting=False, alignment=False):
     if alignment:
         try:
             from Aligment.Aligment import AlignerMtcnn
-            # istanzia su CPU per sicurezza con num_workers > 0
+
             aligner = AlignerMtcnn(device='cpu', out_size=(224, 224))
         except Exception as e:
             raise RuntimeError("Allineamento richiesto ma AlignerMtcnn o le sue dipendenze non sono disponibili: " + str(e))
