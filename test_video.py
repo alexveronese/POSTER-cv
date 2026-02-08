@@ -13,8 +13,6 @@ from data_preprocessing.dataset_affectnet_8class import Affectdataset_8class
 import matplotlib.pyplot as plt
 from utils import *
 from models.emotion_hyp import pyramid_trans_expr
-from sklearn.metrics import confusion_matrix
-from data_preprocessing.plot_confusion_matrix import plot_confusion_matrix
 from Aligment.Aligment import AlignerMtcnn
 #from moviepy.editor import VideoFileClip, ImageSequenceClip
 #from tqdm.notebook import tqdm
